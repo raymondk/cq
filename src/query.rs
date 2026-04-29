@@ -1482,14 +1482,28 @@ fn eval_expr(
         Expr::BinArith(op, left, right) => {
             let l_results = eval_expr(left, args.clone(), env)?;
             if l_results.len() != 1 || l_results[0].args.len() != 1 {
-                bail!("arithmetic requires a single value on the left side");
+                bail!("'{}' requires a single value on the left side", arith_op_display(*op));
             }
             let r_results = eval_expr(right, args, env)?;
             if r_results.len() != 1 || r_results[0].args.len() != 1 {
-                bail!("arithmetic requires a single value on the right side");
+                bail!("'{}' requires a single value on the right side", arith_op_display(*op));
             }
-            let lv = to_num(&l_results[0].args[0])?;
-            let rv = to_num(&r_results[0].args[0])?;
+            let lval = &l_results[0].args[0];
+            let rval = &r_results[0].args[0];
+            let lv = to_num(lval).map_err(|_| {
+                anyhow::anyhow!(
+                    "type error: '{}' requires numeric operands; left is {}",
+                    arith_op_display(*op),
+                    type_name(lval)
+                )
+            })?;
+            let rv = to_num(rval).map_err(|_| {
+                anyhow::anyhow!(
+                    "type error: '{}' requires numeric operands; right is {}",
+                    arith_op_display(*op),
+                    type_name(rval)
+                )
+            })?;
             let result = eval_arith(*op, lv, rv)?;
             Ok(vec![IDLArgs::new(&[from_num(result)])])
         }
@@ -1497,11 +1511,11 @@ fn eval_expr(
         Expr::BinCmp(op, left, right) => {
             let l_results = eval_expr(left, args.clone(), env)?;
             if l_results.len() != 1 || l_results[0].args.len() != 1 {
-                bail!("comparison requires a single value on the left side");
+                bail!("'{}' requires a single value on the left side", cmp_op_display(*op));
             }
             let r_results = eval_expr(right, args, env)?;
             if r_results.len() != 1 || r_results[0].args.len() != 1 {
-                bail!("comparison requires a single value on the right side");
+                bail!("'{}' requires a single value on the right side", cmp_op_display(*op));
             }
             let lval = &l_results[0].args[0];
             let rval = &r_results[0].args[0];
@@ -1529,8 +1543,30 @@ fn eval_expr(
                 };
                 return Ok(vec![IDLArgs::new(&[IDLValue::Bool(result)])]);
             }
-            let lv = to_num(lval)?;
-            let rv = to_num(rval)?;
+            let lt = type_name(lval);
+            let rt = type_name(rval);
+            let l_is_text = matches!(lval, IDLValue::Text(_));
+            let r_is_text = matches!(rval, IDLValue::Text(_));
+            let l_is_principal = matches!(lval, IDLValue::Principal(_));
+            let r_is_principal = matches!(rval, IDLValue::Principal(_));
+            if l_is_text != r_is_text || l_is_principal != r_is_principal {
+                bail!(
+                    "type error: '{}' cannot compare {lt} with {rt}; both sides must be the same type",
+                    cmp_op_display(*op)
+                );
+            }
+            let lv = to_num(lval).map_err(|_| {
+                anyhow::anyhow!(
+                    "type error: '{}' requires numeric, text, or principal operands; got {lt}",
+                    cmp_op_display(*op)
+                )
+            })?;
+            let rv = to_num(rval).map_err(|_| {
+                anyhow::anyhow!(
+                    "type error: '{}' requires numeric, text, or principal operands; got {rt}",
+                    cmp_op_display(*op)
+                )
+            })?;
             let result = eval_cmp(*op, lv, rv)?;
             Ok(vec![IDLArgs::new(&[IDLValue::Bool(result)])])
         }
@@ -1593,9 +1629,27 @@ fn eval_expr(
                     return eval_expr(body, IDLArgs::new(&[payload]), env);
                 }
             }
-            bail!(
-                "no match arm for variant tag '{active_tag}'; add a '_ = ...' default arm"
-            )
+            let arm_names: Vec<String> = arms
+                .iter()
+                .filter_map(|(arm, _)| {
+                    if let MatchArm::Tag(t) = arm {
+                        Some(t.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let mut msg = format!("no match arm for variant tag '{active_tag}'");
+            if let Some(suggestion) = did_you_mean(&active_tag, &arm_names) {
+                msg.push_str(&format!("; did you mean '{suggestion}'?"));
+            }
+            if !arm_names.is_empty() {
+                let mut sorted = arm_names.clone();
+                sorted.sort();
+                msg.push_str(&format!("; arms: {}", sorted.join(", ")));
+            }
+            msg.push_str("; add a '_ = ...' default arm");
+            bail!("{msg}")
         }
 
         Expr::Tag(inner) => {
@@ -2226,11 +2280,14 @@ fn extract_field(args: &IDLArgs, name: &str, mode: OptMode) -> Result<Vec<IDLVal
             if mode == OptMode::Optional {
                 return Ok(vec![]);
             }
-            let available: Vec<String> = fields.iter().map(|f| label_display(&f.id)).collect();
-            bail!(
-                "unknown field '{name}'; available fields: {}",
-                available.join(", ")
-            );
+            let mut available: Vec<String> = fields.iter().map(|f| label_display(&f.id)).collect();
+            available.sort();
+            let mut msg = format!("unknown field '{name}'");
+            if let Some(suggestion) = did_you_mean(name, &available) {
+                msg.push_str(&format!("; did you mean '{suggestion}'?"));
+            }
+            msg.push_str(&format!("; available fields: {}", available.join(", ")));
+            bail!("{msg}");
         }
         IDLValue::Variant(v) => {
             let field = &v.0;
@@ -2426,4 +2483,58 @@ fn type_name(val: &IDLValue) -> &'static str {
         IDLValue::Int64(_) => "int64",
         IDLValue::Reserved => "reserved",
     }
+}
+
+fn arith_op_display(op: ArithOp) -> &'static str {
+    match op {
+        ArithOp::Add => "+",
+        ArithOp::Sub => "-",
+        ArithOp::Mul => "*",
+        ArithOp::Div => "/",
+        ArithOp::Rem => "%",
+    }
+}
+
+fn cmp_op_display(op: CmpOp) -> &'static str {
+    match op {
+        CmpOp::Eq => "==",
+        CmpOp::Ne => "!=",
+        CmpOp::Lt => "<",
+        CmpOp::Gt => ">",
+        CmpOp::Le => "<=",
+        CmpOp::Ge => ">=",
+    }
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let la = a.len();
+    let lb = b.len();
+    let mut dp = vec![vec![0usize; lb + 1]; la + 1];
+    for i in 0..=la {
+        dp[i][0] = i;
+    }
+    for j in 0..=lb {
+        dp[0][j] = j;
+    }
+    for i in 1..=la {
+        for j in 1..=lb {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            dp[i][j] = (dp[i - 1][j] + 1)
+                .min(dp[i][j - 1] + 1)
+                .min(dp[i - 1][j - 1] + cost);
+        }
+    }
+    dp[la][lb]
+}
+
+fn did_you_mean(query: &str, candidates: &[String]) -> Option<String> {
+    let threshold = (query.len() / 2).max(2);
+    candidates
+        .iter()
+        .map(|c| (levenshtein(query, c), c))
+        .filter(|(d, _)| *d <= threshold && *d > 0)
+        .min_by_key(|(d, _)| *d)
+        .map(|(_, c)| c.clone())
 }

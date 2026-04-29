@@ -2281,3 +2281,101 @@ fn hash_named_and_numeric_equivalent() {
         .success()
         .stdout("(99 : nat)\n");
 }
+
+// --- Slice 15: did-you-mean error messages ---
+
+#[test]
+fn did_you_mean_close_field_name() {
+    // "fo" is close to "foo" → did-you-mean suggestion
+    cq()
+        .args([".fo"])
+        .write_stdin("(record { foo = 1 : nat })")
+        .assert()
+        .failure()
+        .stderr(contains("did you mean 'foo'"));
+}
+
+#[test]
+fn did_you_mean_no_suggestion_far_field() {
+    // "xyz" is not close to any of foo/bar → no suggestion, but lists fields
+    cq()
+        .args([".xyz"])
+        .write_stdin("(record { foo = 1 : nat; bar = 2 : nat })")
+        .assert()
+        .failure()
+        .stderr(contains("unknown field 'xyz'"))
+        .stderr(contains("bar"))
+        .stderr(contains("foo"));
+}
+
+#[test]
+fn unknown_field_lists_sorted_fields() {
+    // Available fields are listed in sorted order
+    cq()
+        .args([".missing"])
+        .write_stdin("(record { zebra = 1 : nat; apple = 2 : nat; mango = 3 : nat })")
+        .assert()
+        .failure()
+        .stderr(contains("apple, mango, zebra"));
+}
+
+#[test]
+fn match_no_arm_lists_arms() {
+    // When no match arm fires, list all defined arms
+    cq()
+        .args(["match { Send = 1; Receive = 2 }"])
+        .write_stdin("(variant { Transfer = 42 : nat })")
+        .assert()
+        .failure()
+        .stderr(contains("Transfer"))
+        .stderr(contains("Receive"))
+        .stderr(contains("Send"));
+}
+
+#[test]
+fn match_no_arm_did_you_mean() {
+    // Typo in arm name → did-you-mean suggestion (no default arm so it errors)
+    cq()
+        .args(["match { Transfr = 1 }"])
+        .write_stdin("(variant { Transfer = 42 : nat })")
+        .assert()
+        .failure()
+        .stderr(contains("Transfer"))
+        .stderr(contains("did you mean 'Transfr'"));
+}
+
+#[test]
+fn arith_type_error_names_operator() {
+    // '+' on non-numeric gives the operator name in the error
+    cq()
+        .args([r#". + 1"#])
+        .write_stdin(r#"("hello")"#)
+        .assert()
+        .failure()
+        .stderr(contains("'+'"))
+        .stderr(contains("text"));
+}
+
+#[test]
+fn cmp_type_error_names_operator() {
+    // '==' on non-numeric non-text gives the operator name in the error
+    cq()
+        .args([". == true"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .failure()
+        .stderr(contains("'=='"))
+        .stderr(contains("bool"));
+}
+
+#[test]
+fn cmp_mixed_types_error() {
+    // Comparing text vs nat gives a type-mismatch error naming both types
+    cq()
+        .args([r#". == 1"#])
+        .write_stdin(r#"("hello")"#)
+        .assert()
+        .failure()
+        .stderr(contains("'=='"))
+        .stderr(contains("text"));
+}
