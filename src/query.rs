@@ -122,6 +122,40 @@ enum Expr {
     VarRef(String),
     /// `"text \(expr) more"` — string interpolation
     StrInterp(Vec<StrPart>),
+    /// `length` — vec element count / text char count / blob byte count
+    Length,
+    /// `keys` — sorted vec of record field names as text
+    Keys,
+    /// `values` — vec of record field values in key-sorted order
+    Values,
+    /// `type` — Candid type tag as text
+    TypeOf,
+    /// `has(name_expr)` — bool: record has named field?
+    Has(Box<Expr>),
+    /// `contains(val_expr)` — bool: substring for text, element for vec
+    Contains(Box<Expr>),
+    /// `map(filter)` — apply filter to each vec element, collect results
+    Map(Box<Expr>),
+    /// `to_text` — value to text string
+    ToText,
+    /// `to_int` — numeric / text → int
+    ToInt,
+    /// `to_float` — numeric / text → float64
+    ToFloat,
+    /// `to_principal` — text → principal
+    ToPrincipal,
+    /// `to_hex` — blob → hex text
+    ToHex,
+    /// `from_hex` — hex text → blob
+    FromHex,
+    /// `to_utf8` — text → blob (UTF-8 bytes)
+    ToUtf8,
+    /// `from_utf8` — blob → text (UTF-8 decode)
+    FromUtf8,
+    /// `is_some` — opt-Some → true, opt-None → false
+    IsSome,
+    /// `is_none` — opt-None → true, opt-Some → false
+    IsNone,
 }
 
 // ---------------------------------------------------------------------------
@@ -543,6 +577,112 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
     if s.starts_with('[') {
         let (elems, rest) = parse_vec_constructor(&s[1..])?;
         return Ok((Expr::MakeVec(elems), rest));
+    }
+
+    // --- Generic builtins (longer names before shorter to avoid prefix shadowing) ---
+
+    // `from_hex` / `from_utf8` — must check `from_` before `from` alone
+    if let Some(after) = s.strip_prefix("from_hex") {
+        if keyword_boundary(after) {
+            return Ok((Expr::FromHex, after));
+        }
+    }
+    if let Some(after) = s.strip_prefix("from_utf8") {
+        if keyword_boundary(after) {
+            return Ok((Expr::FromUtf8, after));
+        }
+    }
+
+    // `to_principal` before `to_` prefix alternatives
+    if let Some(after) = s.strip_prefix("to_principal") {
+        if keyword_boundary(after) {
+            return Ok((Expr::ToPrincipal, after));
+        }
+    }
+    if let Some(after) = s.strip_prefix("to_float") {
+        if keyword_boundary(after) {
+            return Ok((Expr::ToFloat, after));
+        }
+    }
+    if let Some(after) = s.strip_prefix("to_text") {
+        if keyword_boundary(after) {
+            return Ok((Expr::ToText, after));
+        }
+    }
+    if let Some(after) = s.strip_prefix("to_utf8") {
+        if keyword_boundary(after) {
+            return Ok((Expr::ToUtf8, after));
+        }
+    }
+    if let Some(after) = s.strip_prefix("to_hex") {
+        if keyword_boundary(after) {
+            return Ok((Expr::ToHex, after));
+        }
+    }
+    if let Some(after) = s.strip_prefix("to_int") {
+        if keyword_boundary(after) {
+            return Ok((Expr::ToInt, after));
+        }
+    }
+
+    // `is_some` / `is_none`
+    if let Some(after) = s.strip_prefix("is_some") {
+        if keyword_boundary(after) {
+            return Ok((Expr::IsSome, after));
+        }
+    }
+    if let Some(after) = s.strip_prefix("is_none") {
+        if keyword_boundary(after) {
+            return Ok((Expr::IsNone, after));
+        }
+    }
+
+    // `length` / `keys` / `values` / `type`
+    if let Some(after) = s.strip_prefix("length") {
+        if keyword_boundary(after) {
+            return Ok((Expr::Length, after));
+        }
+    }
+    if let Some(after) = s.strip_prefix("keys") {
+        if keyword_boundary(after) {
+            return Ok((Expr::Keys, after));
+        }
+    }
+    if let Some(after) = s.strip_prefix("values") {
+        if keyword_boundary(after) {
+            return Ok((Expr::Values, after));
+        }
+    }
+    if let Some(after) = s.strip_prefix("type") {
+        if keyword_boundary(after) {
+            return Ok((Expr::TypeOf, after));
+        }
+    }
+
+    // `has(expr)` / `contains(expr)` / `map(expr)`
+    if let Some(after) = s.strip_prefix("has(") {
+        let (inner, rest) = parse_pipe(after.trim_start())?;
+        let rest = rest.trim_start();
+        let rest = rest
+            .strip_prefix(')')
+            .ok_or_else(|| anyhow::anyhow!("expected ')' after has(...)"))?;
+        return Ok((Expr::Has(Box::new(inner)), rest));
+    }
+    if let Some(after) = s.strip_prefix("contains(") {
+        let (inner, rest) = parse_pipe(after.trim_start())?;
+        let rest = rest.trim_start();
+        let rest = rest
+            .strip_prefix(')')
+            .ok_or_else(|| anyhow::anyhow!("expected ')' after contains(...)"))?;
+        return Ok((Expr::Contains(Box::new(inner)), rest));
+    }
+    if let Some(after) = s.strip_prefix("map(") {
+        let (inner, rest) = parse_pipe(after.trim_start())?;
+        let rest = rest.trim_start();
+        let rest = rest
+            .strip_prefix(')')
+            .ok_or_else(|| anyhow::anyhow!("expected ')' after map(...)"))?;
+        return Ok((Expr::Map(Box::new(inner)), rest));
     }
 
     // fallthrough to dotchain
@@ -1340,6 +1480,19 @@ fn eval_expr(
                 };
                 return Ok(vec![IDLArgs::new(&[IDLValue::Bool(result)])]);
             }
+            if let (IDLValue::Principal(lp), IDLValue::Principal(rp)) = (lval, rval) {
+                let ls = lp.to_text();
+                let rs = rp.to_text();
+                let result = match op {
+                    CmpOp::Eq => ls == rs,
+                    CmpOp::Ne => ls != rs,
+                    CmpOp::Lt => ls < rs,
+                    CmpOp::Gt => ls > rs,
+                    CmpOp::Le => ls <= rs,
+                    CmpOp::Ge => ls >= rs,
+                };
+                return Ok(vec![IDLArgs::new(&[IDLValue::Bool(result)])]);
+            }
             let lv = to_num(lval)?;
             let rv = to_num(rval)?;
             let result = eval_cmp(*op, lv, rv)?;
@@ -1490,6 +1643,256 @@ fn eval_expr(
                 }
             }
             Ok(vec![IDLArgs::new(&[IDLValue::Text(result)])])
+        }
+
+        Expr::Length => {
+            let val = require_single_val(&args, "length")?;
+            let n: u64 = match &val {
+                IDLValue::Vec(items) => items.len() as u64,
+                IDLValue::Text(s) => s.chars().count() as u64,
+                IDLValue::Blob(bytes) => bytes.len() as u64,
+                other => bail!("length requires vec, text, or blob, got {}", type_name(other)),
+            };
+            Ok(vec![IDLArgs::new(&[IDLValue::Nat(candid::Nat::from(n))])])
+        }
+
+        Expr::Keys => {
+            let val = require_single_val(&args, "keys")?;
+            match val {
+                IDLValue::Record(mut fields) => {
+                    fields.sort_by(|a, b| label_display(&a.id).cmp(&label_display(&b.id)));
+                    let keys: Vec<IDLValue> = fields
+                        .iter()
+                        .map(|f| IDLValue::Text(label_display(&f.id)))
+                        .collect();
+                    Ok(vec![IDLArgs::new(&[IDLValue::Vec(keys)])])
+                }
+                other => bail!("keys requires a record, got {}", type_name(&other)),
+            }
+        }
+
+        Expr::Values => {
+            let val = require_single_val(&args, "values")?;
+            match val {
+                IDLValue::Record(mut fields) => {
+                    fields.sort_by(|a, b| label_display(&a.id).cmp(&label_display(&b.id)));
+                    let vals: Vec<IDLValue> = fields.into_iter().map(|f| f.val).collect();
+                    Ok(vec![IDLArgs::new(&[IDLValue::Vec(vals)])])
+                }
+                other => bail!("values requires a record, got {}", type_name(&other)),
+            }
+        }
+
+        Expr::TypeOf => {
+            let val = require_single_val(&args, "type")?;
+            Ok(vec![IDLArgs::new(&[IDLValue::Text(
+                type_tag(&val).to_string(),
+            )])])
+        }
+
+        Expr::Has(name_expr) => {
+            let name_result = eval_expr(name_expr, args.clone(), env)?;
+            if name_result.len() != 1 || name_result[0].args.len() != 1 {
+                bail!("has() requires a single name value");
+            }
+            let name = match &name_result[0].args[0] {
+                IDLValue::Text(s) => s.clone(),
+                other => bail!("has() requires a text name, got {}", type_name(other)),
+            };
+            let val = require_single_val(&args, "has")?;
+            match val {
+                IDLValue::Record(fields) => {
+                    let hash = candid::idl_hash(&name);
+                    let found = fields.iter().any(|f| label_matches(&f.id, &name, hash));
+                    Ok(vec![IDLArgs::new(&[IDLValue::Bool(found)])])
+                }
+                other => bail!("has() requires a record, got {}", type_name(&other)),
+            }
+        }
+
+        Expr::Contains(val_expr) => {
+            let needle_result = eval_expr(val_expr, args.clone(), env)?;
+            if needle_result.len() != 1 || needle_result[0].args.len() != 1 {
+                bail!("contains() requires a single value argument");
+            }
+            let needle = &needle_result[0].args[0];
+            let val = require_single_val(&args, "contains")?;
+            match &val {
+                IDLValue::Text(s) => match needle {
+                    IDLValue::Text(sub) => {
+                        Ok(vec![IDLArgs::new(&[IDLValue::Bool(s.contains(sub.as_str()))])])
+                    }
+                    other => bail!(
+                        "contains() on text requires a text argument, got {}",
+                        type_name(other)
+                    ),
+                },
+                IDLValue::Vec(items) => {
+                    let found = items.iter().any(|item| item == needle);
+                    Ok(vec![IDLArgs::new(&[IDLValue::Bool(found)])])
+                }
+                other => bail!(
+                    "contains() requires text or vec, got {}",
+                    type_name(other)
+                ),
+            }
+        }
+
+        Expr::Map(filter) => {
+            let val = require_single_val(&args, "map")?;
+            match val {
+                IDLValue::Vec(items) => {
+                    let mut results: Vec<IDLValue> = Vec::new();
+                    for item in items {
+                        let item_args = IDLArgs::new(&[item]);
+                        for r in eval_expr(filter, item_args, env)? {
+                            if r.args.len() != 1 {
+                                bail!("map filter must produce single values per element");
+                            }
+                            results.push(r.args.into_iter().next().unwrap());
+                        }
+                    }
+                    Ok(vec![IDLArgs::new(&[IDLValue::Vec(results)])])
+                }
+                other => bail!("map requires a vec, got {}", type_name(&other)),
+            }
+        }
+
+        Expr::ToText => {
+            let val = require_single_val(&args, "to_text")?;
+            Ok(vec![IDLArgs::new(&[IDLValue::Text(idl_to_text(&val))])])
+        }
+
+        Expr::ToInt => {
+            let val = require_single_val(&args, "to_int")?;
+            let n: BigInt = match &val {
+                IDLValue::Int(n) => n.0.clone(),
+                IDLValue::Nat(n) => BigInt::from(n.0.clone()),
+                IDLValue::Number(s) => s
+                    .parse::<BigInt>()
+                    .map_err(|_| anyhow::anyhow!("to_int: cannot parse {:?} as integer", s))?,
+                IDLValue::Nat8(n) => BigInt::from(*n as i64),
+                IDLValue::Nat16(n) => BigInt::from(*n as i64),
+                IDLValue::Nat32(n) => BigInt::from(*n as i64),
+                IDLValue::Nat64(n) => BigInt::from(*n as i64),
+                IDLValue::Int8(n) => BigInt::from(*n as i64),
+                IDLValue::Int16(n) => BigInt::from(*n as i64),
+                IDLValue::Int32(n) => BigInt::from(*n as i64),
+                IDLValue::Int64(n) => BigInt::from(*n as i64),
+                IDLValue::Float32(f) => BigInt::from(*f as i64),
+                IDLValue::Float64(f) => BigInt::from(*f as i64),
+                IDLValue::Text(s) => s
+                    .parse::<BigInt>()
+                    .map_err(|_| anyhow::anyhow!("to_int: cannot parse {:?} as integer", s))?,
+                other => bail!("to_int: cannot convert {} to int", type_name(other)),
+            };
+            Ok(vec![IDLArgs::new(&[IDLValue::Int(candid::Int(n))])])
+        }
+
+        Expr::ToFloat => {
+            let val = require_single_val(&args, "to_float")?;
+            let f: f64 = match &val {
+                IDLValue::Float64(f) => *f,
+                IDLValue::Float32(f) => *f as f64,
+                IDLValue::Nat(n) => n
+                    .to_string()
+                    .parse::<f64>()
+                    .map_err(|_| anyhow::anyhow!("to_float: cannot convert nat to f64"))?,
+                IDLValue::Int(n) => n
+                    .to_string()
+                    .parse::<f64>()
+                    .map_err(|_| anyhow::anyhow!("to_float: cannot convert int to f64"))?,
+                IDLValue::Number(s) => s
+                    .parse::<f64>()
+                    .map_err(|_| anyhow::anyhow!("to_float: cannot parse {:?} as float", s))?,
+                IDLValue::Nat8(n) => *n as f64,
+                IDLValue::Nat16(n) => *n as f64,
+                IDLValue::Nat32(n) => *n as f64,
+                IDLValue::Nat64(n) => *n as f64,
+                IDLValue::Int8(n) => *n as f64,
+                IDLValue::Int16(n) => *n as f64,
+                IDLValue::Int32(n) => *n as f64,
+                IDLValue::Int64(n) => *n as f64,
+                IDLValue::Text(s) => s
+                    .parse::<f64>()
+                    .map_err(|_| anyhow::anyhow!("to_float: cannot parse {:?} as float", s))?,
+                other => bail!("to_float: cannot convert {} to float", type_name(other)),
+            };
+            Ok(vec![IDLArgs::new(&[IDLValue::Float64(f)])])
+        }
+
+        Expr::ToPrincipal => {
+            let val = require_single_val(&args, "to_principal")?;
+            match val {
+                IDLValue::Text(s) => {
+                    let p = candid::Principal::from_text(&s)
+                        .map_err(|e| anyhow::anyhow!("to_principal: invalid principal {:?}: {e}", s))?;
+                    Ok(vec![IDLArgs::new(&[IDLValue::Principal(p)])])
+                }
+                other => bail!("to_principal requires text, got {}", type_name(&other)),
+            }
+        }
+
+        Expr::ToHex => {
+            let val = require_single_val(&args, "to_hex")?;
+            match val {
+                IDLValue::Blob(bytes) => {
+                    Ok(vec![IDLArgs::new(&[IDLValue::Text(hex::encode(&bytes))])])
+                }
+                other => bail!("to_hex requires blob, got {}", type_name(&other)),
+            }
+        }
+
+        Expr::FromHex => {
+            let val = require_single_val(&args, "from_hex")?;
+            match val {
+                IDLValue::Text(s) => {
+                    let bytes = hex::decode(&s)
+                        .map_err(|e| anyhow::anyhow!("from_hex: invalid hex string: {e}"))?;
+                    Ok(vec![IDLArgs::new(&[IDLValue::Blob(bytes)])])
+                }
+                other => bail!("from_hex requires text, got {}", type_name(&other)),
+            }
+        }
+
+        Expr::ToUtf8 => {
+            let val = require_single_val(&args, "to_utf8")?;
+            match val {
+                IDLValue::Text(s) => {
+                    Ok(vec![IDLArgs::new(&[IDLValue::Blob(s.into_bytes())])])
+                }
+                other => bail!("to_utf8 requires text, got {}", type_name(&other)),
+            }
+        }
+
+        Expr::FromUtf8 => {
+            let val = require_single_val(&args, "from_utf8")?;
+            match val {
+                IDLValue::Blob(bytes) => {
+                    let s = String::from_utf8(bytes)
+                        .map_err(|_| anyhow::anyhow!("from_utf8: blob is not valid UTF-8"))?;
+                    Ok(vec![IDLArgs::new(&[IDLValue::Text(s)])])
+                }
+                other => bail!("from_utf8 requires blob, got {}", type_name(&other)),
+            }
+        }
+
+        Expr::IsSome => {
+            let val = require_single_val(&args, "is_some")?;
+            match val {
+                IDLValue::Opt(_) => Ok(vec![IDLArgs::new(&[IDLValue::Bool(true)])]),
+                IDLValue::None => Ok(vec![IDLArgs::new(&[IDLValue::Bool(false)])]),
+                other => bail!("is_some requires an opt value, got {}", type_name(&other)),
+            }
+        }
+
+        Expr::IsNone => {
+            let val = require_single_val(&args, "is_none")?;
+            match val {
+                IDLValue::Opt(_) => Ok(vec![IDLArgs::new(&[IDLValue::Bool(false)])]),
+                IDLValue::None => Ok(vec![IDLArgs::new(&[IDLValue::Bool(true)])]),
+                other => bail!("is_none requires an opt value, got {}", type_name(&other)),
+            }
         }
     }
 }
@@ -1757,6 +2160,46 @@ fn label_display(label: &Label) -> String {
     match label {
         Label::Named(n) => n.clone(),
         Label::Id(n) | Label::Unnamed(n) => n.to_string(),
+    }
+}
+
+fn require_single_val(args: &IDLArgs, ctx: &str) -> Result<IDLValue> {
+    if args.args.len() != 1 {
+        bail!(
+            "'{ctx}' requires a single value, got {} values",
+            args.args.len()
+        );
+    }
+    Ok(args.args[0].clone())
+}
+
+fn type_tag(val: &IDLValue) -> &'static str {
+    match val {
+        IDLValue::Bool(_) => "bool",
+        IDLValue::Null | IDLValue::None => "null",
+        IDLValue::Text(_) => "text",
+        IDLValue::Number(_) => "number",
+        IDLValue::Float32(_) => "float32",
+        IDLValue::Float64(_) => "float64",
+        IDLValue::Opt(_) => "opt",
+        IDLValue::Vec(_) => "vec",
+        IDLValue::Record(_) => "record",
+        IDLValue::Variant(_) => "variant",
+        IDLValue::Blob(_) => "blob",
+        IDLValue::Principal(_) => "principal",
+        IDLValue::Int(_) => "int",
+        IDLValue::Nat(_) => "nat",
+        IDLValue::Nat8(_) => "nat8",
+        IDLValue::Nat16(_) => "nat16",
+        IDLValue::Nat32(_) => "nat32",
+        IDLValue::Nat64(_) => "nat64",
+        IDLValue::Int8(_) => "int8",
+        IDLValue::Int16(_) => "int16",
+        IDLValue::Int32(_) => "int32",
+        IDLValue::Int64(_) => "int64",
+        IDLValue::Service(_) => "service",
+        IDLValue::Func(_, _) => "func",
+        IDLValue::Reserved => "reserved",
     }
 }
 

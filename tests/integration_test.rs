@@ -1609,3 +1609,335 @@ fn string_interp_var() {
         .success()
         .stdout("(\"val=5\")\n");
 }
+
+// --- Slice 11: generic + conversion builtins ---
+
+#[test]
+fn length_vec() {
+    cq()
+        .args(["length"])
+        .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(3 : nat)\n");
+}
+
+#[test]
+fn length_text() {
+    cq()
+        .args(["length"])
+        .write_stdin("(\"hello\")")
+        .assert()
+        .success()
+        .stdout("(5 : nat)\n");
+}
+
+#[test]
+fn length_blob() {
+    cq()
+        .args(["length"])
+        .write_stdin("(blob \"\\00\\01\\02\")")
+        .assert()
+        .success()
+        .stdout("(3 : nat)\n");
+}
+
+#[test]
+fn keys_record_sorted() {
+    cq()
+        .args(["keys"])
+        .write_stdin("(record { b = 2 : nat; a = 1 : nat })")
+        .assert()
+        .success()
+        .stdout("(vec { \"a\"; \"b\" })\n");
+}
+
+#[test]
+fn values_record_sorted_by_key() {
+    cq()
+        .args(["values"])
+        .write_stdin("(record { b = 2 : nat; a = 1 : nat })")
+        .assert()
+        .success()
+        .stdout("(vec { 1 : nat; 2 : nat })\n");
+}
+
+#[test]
+fn type_nat() {
+    cq()
+        .args(["type"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .success()
+        .stdout("(\"nat\")\n");
+}
+
+#[test]
+fn type_record() {
+    cq()
+        .args(["type"])
+        .write_stdin("(record { x = 1 : nat })")
+        .assert()
+        .success()
+        .stdout("(\"record\")\n");
+}
+
+#[test]
+fn type_variant() {
+    cq()
+        .args(["type"])
+        .write_stdin("(variant { Ok = \"hi\" })")
+        .assert()
+        .success()
+        .stdout("(\"variant\")\n");
+}
+
+#[test]
+fn type_vec() {
+    cq()
+        .args(["type"])
+        .write_stdin("(vec { 1 : nat })")
+        .assert()
+        .success()
+        .stdout("(\"vec\")\n");
+}
+
+#[test]
+fn has_field_present() {
+    cq()
+        .args(["has(\"x\")"])
+        .write_stdin("(record { x = 1 : nat })")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn has_field_absent() {
+    cq()
+        .args(["has(\"y\")"])
+        .write_stdin("(record { x = 1 : nat })")
+        .assert()
+        .success()
+        .stdout("(false)\n");
+}
+
+#[test]
+fn contains_text_found() {
+    cq()
+        .args(["contains(\"world\")"])
+        .write_stdin("(\"hello world\")")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn contains_text_not_found() {
+    cq()
+        .args(["contains(\"xyz\")"])
+        .write_stdin("(\"hello world\")")
+        .assert()
+        .success()
+        .stdout("(false)\n");
+}
+
+#[test]
+fn contains_vec_found() {
+    cq()
+        .args(["contains(2 : nat)"])
+        .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn contains_vec_not_found() {
+    cq()
+        .args(["contains(99 : nat)"])
+        .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(false)\n");
+}
+
+#[test]
+fn map_add_one() {
+    cq()
+        .args(["map(. + 1)"])
+        .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(vec { 2 : nat; 3 : nat; 4 : nat })\n");
+}
+
+#[test]
+fn map_empty_vec() {
+    cq()
+        .args(["map(. + 1)"])
+        .write_stdin("(vec {})")
+        .assert()
+        .success()
+        .stdout("(vec {})\n");
+}
+
+#[test]
+fn to_text_nat() {
+    cq()
+        .args(["to_text"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .success()
+        .stdout("(\"42\")\n");
+}
+
+#[test]
+fn to_text_bool() {
+    cq()
+        .args(["to_text"])
+        .write_stdin("(true)")
+        .assert()
+        .success()
+        .stdout("(\"true\")\n");
+}
+
+#[test]
+fn to_int_from_nat() {
+    cq()
+        .args(["to_int"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .success()
+        .stdout("(42 : int)\n");
+}
+
+#[test]
+fn to_int_from_text() {
+    cq()
+        .args(["to_int"])
+        .write_stdin("(\"-7\")")
+        .assert()
+        .success()
+        .stdout("(-7 : int)\n");
+}
+
+#[test]
+fn to_float_from_nat() {
+    cq()
+        .args(["to_float"])
+        .write_stdin("(3 : nat)")
+        .assert()
+        .success()
+        .stdout("(3.0 : float64)\n");
+}
+
+#[test]
+fn to_principal_from_text() {
+    cq()
+        .args(["to_principal"])
+        .write_stdin("(\"aaaaa-aa\")")
+        .assert()
+        .success()
+        .stdout("(principal \"aaaaa-aa\")\n");
+}
+
+#[test]
+fn to_hex_blob() {
+    cq()
+        .args(["to_hex"])
+        .write_stdin("(blob \"\\00\\ff\")")
+        .assert()
+        .success()
+        .stdout("(\"00ff\")\n");
+}
+
+#[test]
+fn from_hex_text() {
+    cq()
+        .args(["from_hex"])
+        .write_stdin("(\"00ff\")")
+        .assert()
+        .success()
+        .stdout("(blob \"\\00\\ff\")\n");
+}
+
+#[test]
+fn to_utf8_text() {
+    cq()
+        .args(["to_utf8"])
+        .write_stdin("(\"hi\")")
+        .assert()
+        .success()
+        .stdout("(blob \"hi\")\n");
+}
+
+#[test]
+fn from_utf8_blob() {
+    cq()
+        .args(["from_utf8"])
+        .write_stdin("(blob \"hi\")")
+        .assert()
+        .success()
+        .stdout("(\"hi\")\n");
+}
+
+#[test]
+fn is_some_on_opt_some() {
+    cq()
+        .args(["is_some"])
+        .write_stdin("(opt (42 : nat))")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn is_some_on_opt_none() {
+    cq()
+        .args(["is_some"])
+        .write_stdin("(null : opt nat)")
+        .assert()
+        .success()
+        .stdout("(false)\n");
+}
+
+#[test]
+fn is_none_on_opt_none() {
+    cq()
+        .args(["is_none"])
+        .write_stdin("(null : opt nat)")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn is_none_on_opt_some() {
+    cq()
+        .args(["is_none"])
+        .write_stdin("(opt (42 : nat))")
+        .assert()
+        .success()
+        .stdout("(false)\n");
+}
+
+#[test]
+fn principal_equality() {
+    cq()
+        .args([". == principal \"aaaaa-aa\""])
+        .write_stdin("(principal \"aaaaa-aa\")")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn principal_inequality() {
+    cq()
+        .args([". != principal \"aaaaa-aa\""])
+        .write_stdin("(principal \"2vxsx-fae\")")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
