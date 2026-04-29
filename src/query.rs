@@ -1,5 +1,6 @@
 use anyhow::{bail, Result};
 use candid::types::Label;
+use candid::types::value::{IDLField, VariantValue};
 use candid::{IDLArgs, IDLValue};
 
 // ---------------------------------------------------------------------------
@@ -11,6 +12,22 @@ enum OptMode {
     Normal,   // .field
     Optional, // .field?  — empty on miss/None, unwrap if Some
     Assert,   // .field!  — error on miss/None, unwrap if Some
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TypeAscription {
+    Nat,
+    Int,
+    Nat8,
+    Nat16,
+    Nat32,
+    Nat64,
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Float32,
+    Float64,
 }
 
 enum Expr {
@@ -29,6 +46,20 @@ enum Expr {
     SomeOf(Box<Expr>),
     /// `none` — opt-None literal
     None_,
+    /// `{a: expr, b: expr}` — record construction
+    MakeRecord(Vec<(String, Box<Expr>)>),
+    /// `[expr, expr, ...]` — vec construction
+    MakeVec(Vec<Box<Expr>>),
+    /// `variant { Tag = expr }` or `variant { Tag }`
+    MakeVariant(String, Option<Box<Expr>>),
+    /// `principal "text"`
+    MakePrincipal(String),
+    /// `blob "..."` — blob from candid escape string
+    MakeBlob(Vec<u8>),
+    /// `blob_hex(expr)` — blob from hex-producing expression
+    BlobHex(Box<Expr>),
+    /// `expr : Type` — type ascription
+    Ascribe(Box<Expr>, TypeAscription),
 }
 
 // ---------------------------------------------------------------------------
@@ -43,9 +74,9 @@ fn parse(s: &str) -> Result<Expr> {
     Ok(expr)
 }
 
-// pipe has lowest precedence: alt | alt | ...
+// pipe has lowest precedence: ascribe | ascribe | ...
 fn parse_pipe(s: &str) -> Result<(Expr, &str)> {
-    let (left, rest) = parse_alt(s)?;
+    let (left, rest) = parse_ascribe(s)?;
     let rest = rest.trim_start();
     if let Some(after) = rest.strip_prefix('|') {
         // Don't consume '//' as a pipe '|'
@@ -59,7 +90,50 @@ fn parse_pipe(s: &str) -> Result<(Expr, &str)> {
     }
 }
 
-// alt: atom // atom // ... — higher precedence than pipe
+// ascribe: alt (: TypeName)?
+fn parse_ascribe(s: &str) -> Result<(Expr, &str)> {
+    let (expr, rest) = parse_alt(s)?;
+    let rest_trimmed = rest.trim_start();
+    if let Some(after_colon) = rest_trimmed.strip_prefix(':') {
+        let after_colon = after_colon.trim_start();
+        if let Some((ta, rest2)) = try_parse_type_name(after_colon) {
+            return Ok((Expr::Ascribe(Box::new(expr), ta), rest2));
+        }
+    }
+    Ok((expr, rest))
+}
+
+fn try_parse_type_name(s: &str) -> Option<(TypeAscription, &str)> {
+    // Check longer keywords before shorter ones to avoid prefix matches
+    let keywords: &[(&str, TypeAscription)] = &[
+        ("nat8", TypeAscription::Nat8),
+        ("nat16", TypeAscription::Nat16),
+        ("nat32", TypeAscription::Nat32),
+        ("nat64", TypeAscription::Nat64),
+        ("int8", TypeAscription::Int8),
+        ("int16", TypeAscription::Int16),
+        ("int32", TypeAscription::Int32),
+        ("int64", TypeAscription::Int64),
+        ("float32", TypeAscription::Float32),
+        ("float64", TypeAscription::Float64),
+        ("nat", TypeAscription::Nat),
+        ("int", TypeAscription::Int),
+    ];
+    for (kw, ta) in keywords {
+        if let Some(rest) = s.strip_prefix(kw) {
+            if rest
+                .chars()
+                .next()
+                .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+            {
+                return Some((*ta, rest));
+            }
+        }
+    }
+    None
+}
+
+// alt: atom // atom // ... — higher precedence than ascribe
 fn parse_alt(s: &str) -> Result<(Expr, &str)> {
     let (left, rest) = parse_atom(s)?;
     let rest = rest.trim_start();
@@ -71,11 +145,11 @@ fn parse_alt(s: &str) -> Result<(Expr, &str)> {
     }
 }
 
-// atom: dotchain | some(pipe) | none
+// atom: dotchain | constructors | some(pipe) | none
 fn parse_atom(s: &str) -> Result<(Expr, &str)> {
     let s = s.trim_start();
 
-    // `none` keyword (not followed by alphanumeric or '_', to avoid matching 'none_field')
+    // `none` keyword (not followed by alphanumeric or '_')
     if let Some(after) = s.strip_prefix("none") {
         if after
             .chars()
@@ -94,6 +168,57 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
             .strip_prefix(')')
             .ok_or_else(|| anyhow::anyhow!("expected ')' after some(...)"))?;
         return Ok((Expr::SomeOf(Box::new(inner)), rest));
+    }
+
+    // `principal "text"`
+    if let Some(after) = s.strip_prefix("principal") {
+        let after = after.trim_start();
+        if after.starts_with('"') {
+            let (text_bytes, rest) = parse_quoted_bytes(after)?;
+            let text = String::from_utf8(text_bytes)
+                .map_err(|_| anyhow::anyhow!("principal text must be valid UTF-8"))?;
+            return Ok((Expr::MakePrincipal(text), rest));
+        }
+    }
+
+    // `blob_hex(expr)` — must be checked before `blob "..."` to avoid prefix confusion
+    if let Some(after) = s.strip_prefix("blob_hex(") {
+        let (inner, rest) = parse_pipe(after.trim_start())?;
+        let rest = rest.trim_start();
+        let rest = rest
+            .strip_prefix(')')
+            .ok_or_else(|| anyhow::anyhow!("expected ')' after blob_hex(...)"))?;
+        return Ok((Expr::BlobHex(Box::new(inner)), rest));
+    }
+
+    // `blob "..."`
+    if let Some(after) = s.strip_prefix("blob") {
+        let after = after.trim_start();
+        if after.starts_with('"') {
+            let (bytes, rest) = parse_quoted_bytes(after)?;
+            return Ok((Expr::MakeBlob(bytes), rest));
+        }
+    }
+
+    // `variant { Tag = expr }` or `variant { Tag }`
+    if let Some(after) = s.strip_prefix("variant") {
+        let after = after.trim_start();
+        if after.starts_with('{') {
+            let (name, payload, rest) = parse_variant_constructor(&after[1..])?;
+            return Ok((Expr::MakeVariant(name, payload.map(Box::new)), rest));
+        }
+    }
+
+    // `{ a: expr, b: expr }` — record construction
+    if s.starts_with('{') {
+        let (fields, rest) = parse_record_constructor(&s[1..])?;
+        return Ok((Expr::MakeRecord(fields), rest));
+    }
+
+    // `[ expr, expr, ... ]` — vec construction
+    if s.starts_with('[') {
+        let (elems, rest) = parse_vec_constructor(&s[1..])?;
+        return Ok((Expr::MakeVec(elems), rest));
     }
 
     // fallthrough to dotchain
@@ -190,6 +315,135 @@ fn parse_optional_usize(s: &str) -> Result<(Option<usize>, &str)> {
     Ok((Some(n), &s[num_end..]))
 }
 
+// Parse `{field: expr, field: expr}` — caller consumed the leading `{`
+fn parse_record_constructor(s: &str) -> Result<(Vec<(String, Box<Expr>)>, &str)> {
+    let mut fields = Vec::new();
+    let mut rest = s.trim_start();
+    if let Some(after) = rest.strip_prefix('}') {
+        return Ok((fields, after));
+    }
+    loop {
+        rest = rest.trim_start();
+        let ident_end = rest
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .unwrap_or(rest.len());
+        if ident_end == 0 {
+            bail!("expected field name in record constructor, got {:?}", rest);
+        }
+        let name = rest[..ident_end].to_string();
+        rest = rest[ident_end..].trim_start();
+        rest = rest
+            .strip_prefix(':')
+            .ok_or_else(|| anyhow::anyhow!("expected ':' after field name '{name}'"))?;
+        let (expr, after_expr) = parse_pipe(rest.trim_start())?;
+        fields.push((name, Box::new(expr)));
+        rest = after_expr.trim_start();
+        if let Some(after) = rest.strip_prefix('}') {
+            return Ok((fields, after));
+        } else if let Some(after) = rest.strip_prefix(',') {
+            rest = after;
+        } else {
+            bail!("expected ',' or '}}' in record constructor, got {:?}", rest);
+        }
+    }
+}
+
+// Parse `[expr, expr, ...]` — caller consumed the leading `[`
+fn parse_vec_constructor(s: &str) -> Result<(Vec<Box<Expr>>, &str)> {
+    let mut elems = Vec::new();
+    let mut rest = s.trim_start();
+    if let Some(after) = rest.strip_prefix(']') {
+        return Ok((elems, after));
+    }
+    loop {
+        let (expr, after_expr) = parse_pipe(rest.trim_start())?;
+        elems.push(Box::new(expr));
+        rest = after_expr.trim_start();
+        if let Some(after) = rest.strip_prefix(']') {
+            return Ok((elems, after));
+        } else if let Some(after) = rest.strip_prefix(',') {
+            rest = after;
+        } else {
+            bail!("expected ',' or ']' in vec constructor, got {:?}", rest);
+        }
+    }
+}
+
+// Parse `{ Tag = expr }` or `{ Tag }` — caller consumed the leading `{`
+fn parse_variant_constructor(s: &str) -> Result<(String, Option<Expr>, &str)> {
+    let mut rest = s.trim_start();
+    let ident_end = rest
+        .find(|c: char| !c.is_alphanumeric() && c != '_')
+        .unwrap_or(rest.len());
+    if ident_end == 0 {
+        bail!("expected tag name in variant constructor, got {:?}", rest);
+    }
+    let name = rest[..ident_end].to_string();
+    rest = rest[ident_end..].trim_start();
+
+    let payload = if let Some(after_eq) = rest.strip_prefix('=') {
+        let (expr, after_expr) = parse_pipe(after_eq.trim_start())?;
+        rest = after_expr.trim_start();
+        Some(expr)
+    } else {
+        None
+    };
+
+    rest = rest
+        .strip_prefix('}')
+        .ok_or_else(|| anyhow::anyhow!("expected '}}' to close variant constructor"))?;
+    Ok((name, payload, rest))
+}
+
+// Parse a double-quoted string, returning raw bytes (handles \n \t \r \" \\ \XX hex escapes)
+fn parse_quoted_bytes(s: &str) -> Result<(Vec<u8>, &str)> {
+    let s = s
+        .strip_prefix('"')
+        .ok_or_else(|| anyhow::anyhow!("expected '\"'"))?;
+    let mut result = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => return Ok((result, &s[i + 1..])),
+            b'\\' => {
+                i += 1;
+                if i >= bytes.len() {
+                    bail!("unterminated escape in string literal");
+                }
+                match bytes[i] {
+                    b'n' => result.push(b'\n'),
+                    b't' => result.push(b'\t'),
+                    b'r' => result.push(b'\r'),
+                    b'"' => result.push(b'"'),
+                    b'\\' => result.push(b'\\'),
+                    hi @ (b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F') => {
+                        i += 1;
+                        if i >= bytes.len() {
+                            bail!("incomplete hex escape in string literal");
+                        }
+                        let lo = bytes[i];
+                        result.push(hex_nibble(hi)? << 4 | hex_nibble(lo)?);
+                    }
+                    other => bail!("unknown string escape '\\{}'", other as char),
+                }
+            }
+            b => result.push(b),
+        }
+        i += 1;
+    }
+    bail!("unterminated string literal")
+}
+
+fn hex_nibble(b: u8) -> Result<u8> {
+    Ok(match b {
+        b'0'..=b'9' => b - b'0',
+        b'a'..=b'f' => b - b'a' + 10,
+        b'A'..=b'F' => b - b'A' + 10,
+        _ => bail!("invalid hex character: {:?}", b as char),
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Evaluator
 // ---------------------------------------------------------------------------
@@ -264,6 +518,179 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
                 .collect()
         }
         Expr::None_ => Ok(vec![IDLArgs::new(&[IDLValue::None])]),
+
+        Expr::MakeRecord(fields) => {
+            let mut idl_fields = Vec::new();
+            for (name, field_expr) in fields {
+                let mut results = eval_expr(field_expr, args.clone())?;
+                if results.len() != 1 || results[0].args.len() != 1 {
+                    bail!(
+                        "record field '{name}' must produce exactly one value, got {}",
+                        results.len()
+                    );
+                }
+                let val = results.remove(0).args.into_iter().next().unwrap();
+                idl_fields.push(IDLField {
+                    id: Label::Named(name.clone()),
+                    val,
+                });
+            }
+            Ok(vec![IDLArgs::new(&[IDLValue::Record(idl_fields)])])
+        }
+
+        Expr::MakeVec(elems) => {
+            let mut items = Vec::new();
+            for (i, elem_expr) in elems.iter().enumerate() {
+                let mut results = eval_expr(elem_expr, args.clone())?;
+                if results.len() != 1 || results[0].args.len() != 1 {
+                    bail!(
+                        "vec element {i} must produce exactly one value, got {}",
+                        results.len()
+                    );
+                }
+                items.push(results.remove(0).args.into_iter().next().unwrap());
+            }
+            Ok(vec![IDLArgs::new(&[IDLValue::Vec(items)])])
+        }
+
+        Expr::MakeVariant(name, payload_expr) => {
+            let payload = if let Some(expr) = payload_expr {
+                let mut results = eval_expr(expr, args)?;
+                if results.len() != 1 || results[0].args.len() != 1 {
+                    bail!("variant payload must produce exactly one value");
+                }
+                results.remove(0).args.into_iter().next().unwrap()
+            } else {
+                IDLValue::Null
+            };
+            let field = IDLField {
+                id: Label::Named(name.clone()),
+                val: payload,
+            };
+            Ok(vec![IDLArgs::new(&[IDLValue::Variant(VariantValue(
+                Box::new(field),
+                0,
+            ))])])
+        }
+
+        Expr::MakePrincipal(text) => {
+            let p = candid::Principal::from_text(text)
+                .map_err(|e| anyhow::anyhow!("invalid principal {:?}: {e}", text))?;
+            Ok(vec![IDLArgs::new(&[IDLValue::Principal(p)])])
+        }
+
+        Expr::MakeBlob(bytes) => Ok(vec![IDLArgs::new(&[IDLValue::Blob(bytes.clone())])]),
+
+        Expr::BlobHex(inner) => {
+            let mut results = eval_expr(inner, args)?;
+            if results.len() != 1 || results[0].args.len() != 1 {
+                bail!("blob_hex() requires exactly one text value");
+            }
+            let val = results.remove(0).args.into_iter().next().unwrap();
+            match val {
+                IDLValue::Text(s) => {
+                    let bytes = hex::decode(&s)
+                        .map_err(|e| anyhow::anyhow!("blob_hex: invalid hex string: {e}"))?;
+                    Ok(vec![IDLArgs::new(&[IDLValue::Blob(bytes)])])
+                }
+                other => bail!(
+                    "blob_hex() requires a text value, got {}",
+                    type_name(&other)
+                ),
+            }
+        }
+
+        Expr::Ascribe(inner, target) => {
+            let results = eval_expr(inner, args)?;
+            results
+                .into_iter()
+                .map(|r| {
+                    if r.args.len() != 1 {
+                        bail!("type ascription requires a single value");
+                    }
+                    let val = apply_ascription(r.args.into_iter().next().unwrap(), *target)?;
+                    Ok(IDLArgs::new(&[val]))
+                })
+                .collect()
+        }
+    }
+}
+
+fn apply_ascription(val: IDLValue, target: TypeAscription) -> Result<IDLValue> {
+    let s = match &val {
+        IDLValue::Number(s) => s.clone(),
+        IDLValue::Nat8(n) => n.to_string(),
+        IDLValue::Nat16(n) => n.to_string(),
+        IDLValue::Nat32(n) => n.to_string(),
+        IDLValue::Nat64(n) => n.to_string(),
+        IDLValue::Int8(n) => n.to_string(),
+        IDLValue::Int16(n) => n.to_string(),
+        IDLValue::Int32(n) => n.to_string(),
+        IDLValue::Int64(n) => n.to_string(),
+        IDLValue::Nat(n) => n.to_string(),
+        IDLValue::Int(n) => n.to_string(),
+        IDLValue::Float32(f) => f.to_string(),
+        IDLValue::Float64(f) => f.to_string(),
+        other => bail!(
+            "type ascription requires a numeric value, got {}",
+            type_name(other)
+        ),
+    };
+
+    match target {
+        TypeAscription::Nat8 => s
+            .parse::<u8>()
+            .map(IDLValue::Nat8)
+            .map_err(|_| anyhow::anyhow!("value {:?} is out of range for nat8", s)),
+        TypeAscription::Nat16 => s
+            .parse::<u16>()
+            .map(IDLValue::Nat16)
+            .map_err(|_| anyhow::anyhow!("value {:?} is out of range for nat16", s)),
+        TypeAscription::Nat32 => s
+            .parse::<u32>()
+            .map(IDLValue::Nat32)
+            .map_err(|_| anyhow::anyhow!("value {:?} is out of range for nat32", s)),
+        TypeAscription::Nat64 => s
+            .parse::<u64>()
+            .map(IDLValue::Nat64)
+            .map_err(|_| anyhow::anyhow!("value {:?} is out of range for nat64", s)),
+        TypeAscription::Int8 => s
+            .parse::<i8>()
+            .map(IDLValue::Int8)
+            .map_err(|_| anyhow::anyhow!("value {:?} is out of range for int8", s)),
+        TypeAscription::Int16 => s
+            .parse::<i16>()
+            .map(IDLValue::Int16)
+            .map_err(|_| anyhow::anyhow!("value {:?} is out of range for int16", s)),
+        TypeAscription::Int32 => s
+            .parse::<i32>()
+            .map(IDLValue::Int32)
+            .map_err(|_| anyhow::anyhow!("value {:?} is out of range for int32", s)),
+        TypeAscription::Int64 => s
+            .parse::<i64>()
+            .map(IDLValue::Int64)
+            .map_err(|_| anyhow::anyhow!("value {:?} is out of range for int64", s)),
+        TypeAscription::Nat => {
+            // Parse as u64 then construct Nat (handles all practical values)
+            let n: u64 = s
+                .parse()
+                .map_err(|_| anyhow::anyhow!("value {:?} is not a valid nat", s))?;
+            Ok(IDLValue::Nat(candid::Nat::from(n)))
+        }
+        TypeAscription::Int => {
+            let n: i64 = s
+                .parse()
+                .map_err(|_| anyhow::anyhow!("value {:?} is not a valid int", s))?;
+            Ok(IDLValue::Int(candid::Int::from(n)))
+        }
+        TypeAscription::Float32 => s
+            .parse::<f32>()
+            .map(IDLValue::Float32)
+            .map_err(|_| anyhow::anyhow!("value {:?} is not a valid float32", s)),
+        TypeAscription::Float64 => s
+            .parse::<f64>()
+            .map(IDLValue::Float64)
+            .map_err(|_| anyhow::anyhow!("value {:?} is not a valid float64", s)),
     }
 }
 

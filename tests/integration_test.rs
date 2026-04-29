@@ -728,6 +728,179 @@ fn round_trip_text_to_text_is_identity() {
         .stdout(format!("{}\n", first_str.trim()));
 }
 
+// --- Slice 7: construction syntax ---
+
+#[test]
+fn construct_record_projects_fields() {
+    cq()
+        .args(["{x: .a, y: .b}"])
+        .write_stdin("(record { a = 1 : nat; b = 2 : nat })")
+        .assert()
+        .success()
+        .stdout("(record { x = 1 : nat; y = 2 : nat })\n");
+}
+
+#[test]
+fn construct_record_empty() {
+    cq()
+        .args(["{}"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .success()
+        .stdout("(record {})\n");
+}
+
+#[test]
+fn construct_record_with_identity() {
+    cq()
+        .args(["{val: .}"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .success()
+        .stdout("(record { val = 42 : nat })\n");
+}
+
+#[test]
+fn construct_vec_from_fields() {
+    cq()
+        .args(["[.a, .b, .c]"])
+        .write_stdin("(record { a = 1 : nat; b = 2 : nat; c = 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(vec { 1 : nat; 2 : nat; 3 : nat })\n");
+}
+
+#[test]
+fn construct_vec_empty() {
+    cq()
+        .args(["[]"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .success()
+        .stdout("(vec {})\n");
+}
+
+#[test]
+fn construct_variant_with_payload() {
+    cq()
+        .args(["variant { Ok = . }"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .success()
+        .stdout("(variant { Ok = 42 : nat })\n");
+}
+
+#[test]
+fn construct_variant_null_payload() {
+    cq()
+        .args(["variant { Pending }"])
+        .write_stdin("(null)")
+        .assert()
+        .success()
+        .stdout("(variant { Pending })\n");
+}
+
+#[test]
+fn construct_principal_literal() {
+    cq()
+        .args(["principal \"aaaaa-aa\""])
+        .write_stdin("(null)")
+        .assert()
+        .success()
+        .stdout("(principal \"aaaaa-aa\")\n");
+}
+
+#[test]
+fn construct_principal_invalid_errors() {
+    cq()
+        .args(["principal \"not-valid-principal\""])
+        .write_stdin("(null)")
+        .assert()
+        .failure()
+        .stderr(contains("invalid principal"));
+}
+
+#[test]
+fn construct_blob_string_literal() {
+    cq()
+        .args(["blob \"hello\""])
+        .write_stdin("(null)")
+        .assert()
+        .success()
+        .stdout("(blob \"hello\")\n");
+}
+
+#[test]
+fn construct_blob_hex_escapes() {
+    cq()
+        .args(["blob \"\\00\\01\\02\""])
+        .write_stdin("(null)")
+        .assert()
+        .success()
+        .stdout("(blob \"\\00\\01\\02\")\n");
+}
+
+#[test]
+fn construct_blob_hex_from_text_field() {
+    cq()
+        .args(["blob_hex(.hex)"])
+        .write_stdin("(record { hex = \"deadbeef\" })")
+        .assert()
+        .success()
+        .stdout("(blob \"\\de\\ad\\be\\ef\")\n");
+}
+
+#[test]
+fn construct_blob_hex_invalid_errors() {
+    cq()
+        .args(["blob_hex(.hex)"])
+        .write_stdin("(record { hex = \"not-hex\" })")
+        .assert()
+        .failure()
+        .stderr(contains("invalid hex"));
+}
+
+#[test]
+fn ascribe_nat32() {
+    cq()
+        .args([". : nat32"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .success()
+        .stdout("(42 : nat32)\n");
+}
+
+#[test]
+fn ascribe_nat8_out_of_range_errors() {
+    cq()
+        .args([". : nat8"])
+        .write_stdin("(256 : nat)")
+        .assert()
+        .failure()
+        .stderr(contains("out of range"));
+}
+
+#[test]
+fn ascribe_in_record_field() {
+    cq()
+        .args(["{amount: .bal : nat32}"])
+        .write_stdin("(record { bal = 42 : nat })")
+        .assert()
+        .success()
+        .stdout("(record { amount = 42 : nat32 })\n");
+}
+
+#[test]
+fn construct_record_round_trip_through_field_access() {
+    // Build a record then access a field to verify fidelity
+    cq()
+        .args(["{x: .a} | .x"])
+        .write_stdin("(record { a = 99 : nat })")
+        .assert()
+        .success()
+        .stdout("(99 : nat)\n");
+}
+
 // --- Slice 6: opt handling ---
 
 #[test]
