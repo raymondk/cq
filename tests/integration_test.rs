@@ -1038,3 +1038,303 @@ fn opt_some_round_trip() {
         .success()
         .stdout("(\"hello\")\n");
 }
+
+// --- Slice 8: arithmetic, comparison, select, booleans ---
+
+#[test]
+fn arith_add_nat() {
+    cq()
+        .args([".a + .b"])
+        .write_stdin("(record { a = 10 : nat; b = 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(13 : nat)\n");
+}
+
+#[test]
+fn arith_sub_nat_positive_result() {
+    cq()
+        .args([".a - .b"])
+        .write_stdin("(record { a = 10 : nat; b = 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(7 : nat)\n");
+}
+
+#[test]
+fn arith_sub_nat_negative_result_widens_to_int() {
+    cq()
+        .args([".a - .b"])
+        .write_stdin("(record { a = 3 : nat; b = 10 : nat })")
+        .assert()
+        .success()
+        .stdout("(-7 : int)\n");
+}
+
+#[test]
+fn arith_mul_nat() {
+    cq()
+        .args([".a * .b"])
+        .write_stdin("(record { a = 10 : nat; b = 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(30 : nat)\n");
+}
+
+#[test]
+fn arith_div_nat() {
+    cq()
+        .args([".a / .b"])
+        .write_stdin("(record { a = 10 : nat; b = 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(3 : nat)\n");
+}
+
+#[test]
+fn arith_rem_nat() {
+    cq()
+        .args([".a % .b"])
+        .write_stdin("(record { a = 10 : nat; b = 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(1 : nat)\n");
+}
+
+#[test]
+fn arith_add_literal() {
+    cq()
+        .args([". + 5"])
+        .write_stdin("(10 : nat)")
+        .assert()
+        .success()
+        .stdout("(15 : nat)\n");
+}
+
+#[test]
+fn arith_sized_integer_no_overflow_during_eval() {
+    // nat8(200) + 100 = 300: no error during eval; result is nat, not nat8
+    cq()
+        .args([". + 100"])
+        .write_stdin("(200 : nat8)")
+        .assert()
+        .success()
+        .stdout("(300 : nat)\n");
+}
+
+#[test]
+fn arith_sized_integer_overflow_at_ascription() {
+    // Overflow only errors when ascribed back to nat8
+    cq()
+        .args([". + 100 : nat8"])
+        .write_stdin("(200 : nat8)")
+        .assert()
+        .failure()
+        .stderr(contains("out of range for nat8"));
+}
+
+#[test]
+fn arith_float_int_mixing_errors() {
+    cq()
+        .args([".a + .b"])
+        .write_stdin("(record { a = 1.5 : float64; b = 3 : nat })")
+        .assert()
+        .failure()
+        .stderr(contains("cannot mix float and integer"));
+}
+
+#[test]
+fn cmp_eq_false() {
+    cq()
+        .args([".a == .b"])
+        .write_stdin("(record { a = 10 : nat; b = 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(false)\n");
+}
+
+#[test]
+fn cmp_eq_true() {
+    cq()
+        .args([".a == .b"])
+        .write_stdin("(record { a = 5 : nat; b = 5 : nat })")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn cmp_ne() {
+    cq()
+        .args([".a != .b"])
+        .write_stdin("(record { a = 10 : nat; b = 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn cmp_lt() {
+    cq()
+        .args([". < 5"])
+        .write_stdin("(3 : nat)")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn cmp_gt() {
+    cq()
+        .args([". > 5"])
+        .write_stdin("(10 : nat)")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn cmp_le_equal() {
+    cq()
+        .args([". <= 5"])
+        .write_stdin("(5 : nat)")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn cmp_ge_greater() {
+    cq()
+        .args([". >= 3"])
+        .write_stdin("(5 : nat)")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn cmp_signed_unsigned_mixed() {
+    // signed int(-5) < unsigned nat(3)
+    cq()
+        .args([".a < .b"])
+        .write_stdin("(record { a = -5 : int; b = 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn select_passes_matching_value() {
+    cq()
+        .args(["select(. > 3)"])
+        .write_stdin("(5 : nat)")
+        .assert()
+        .success()
+        .stdout("(5 : nat)\n");
+}
+
+#[test]
+fn select_filters_non_matching_value() {
+    cq()
+        .args(["select(. > 3)"])
+        .write_stdin("(2 : nat)")
+        .assert()
+        .success()
+        .stdout("");
+}
+
+#[test]
+fn select_on_stream_filters_partial() {
+    // Two values: 5 passes, 2 is filtered out
+    let out = cq()
+        .args(["select(. > 3)"])
+        .write_stdin("(5 : nat)\n(2 : nat)")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(String::from_utf8(out).unwrap(), "(5 : nat)\n");
+}
+
+#[test]
+fn bool_not_true() {
+    cq()
+        .args(["not ."])
+        .write_stdin("(true)")
+        .assert()
+        .success()
+        .stdout("(false)\n");
+}
+
+#[test]
+fn bool_not_false() {
+    cq()
+        .args(["not ."])
+        .write_stdin("(false)")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn bool_and_both_true() {
+    cq()
+        .args(["true and true"])
+        .write_stdin("(null)")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn bool_and_one_false() {
+    cq()
+        .args(["true and false"])
+        .write_stdin("(null)")
+        .assert()
+        .success()
+        .stdout("(false)\n");
+}
+
+#[test]
+fn bool_or_one_true() {
+    cq()
+        .args(["false or true"])
+        .write_stdin("(null)")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn bool_or_both_false() {
+    cq()
+        .args(["false or false"])
+        .write_stdin("(null)")
+        .assert()
+        .success()
+        .stdout("(false)\n");
+}
+
+#[test]
+fn bool_compound_and_or() {
+    // (. > 3) and (. < 10)
+    cq()
+        .args([". > 3 and . < 10"])
+        .write_stdin("(5 : nat)")
+        .assert()
+        .success()
+        .stdout("(true)\n");
+}
+
+#[test]
+fn select_with_compound_predicate() {
+    cq()
+        .args(["select(. > 3 and . < 10)"])
+        .write_stdin("(5 : nat)")
+        .assert()
+        .success()
+        .stdout("(5 : nat)\n");
+}

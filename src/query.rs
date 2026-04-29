@@ -2,6 +2,7 @@ use anyhow::{bail, Result};
 use candid::types::Label;
 use candid::types::value::{IDLField, VariantValue};
 use candid::{IDLArgs, IDLValue};
+use num_bigint::{BigInt, BigUint};
 
 // ---------------------------------------------------------------------------
 // AST
@@ -28,6 +29,31 @@ enum TypeAscription {
     Int64,
     Float32,
     Float64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ArithOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CmpOp {
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum BoolOp {
+    And,
+    Or,
 }
 
 enum Expr {
@@ -60,6 +86,18 @@ enum Expr {
     BlobHex(Box<Expr>),
     /// `expr : Type` — type ascription
     Ascribe(Box<Expr>, TypeAscription),
+    /// Integer / bool literal
+    Literal(IDLValue),
+    /// `left op right` arithmetic
+    BinArith(ArithOp, Box<Expr>, Box<Expr>),
+    /// `left op right` comparison → bool
+    BinCmp(CmpOp, Box<Expr>, Box<Expr>),
+    /// `left and/or right` — boolean composition
+    BinBool(BoolOp, Box<Expr>, Box<Expr>),
+    /// `not expr` — boolean negation
+    Not(Box<Expr>),
+    /// `select(predicate)` — pass-through filter
+    Select(Box<Expr>),
 }
 
 // ---------------------------------------------------------------------------
@@ -90,7 +128,7 @@ fn parse_pipe(s: &str) -> Result<(Expr, &str)> {
     }
 }
 
-// ascribe: alt (: TypeName)?
+// ascribe: alt_expr (: TypeName)?
 fn parse_ascribe(s: &str) -> Result<(Expr, &str)> {
     let (expr, rest) = parse_alt(s)?;
     let rest_trimmed = rest.trim_start();
@@ -133,21 +171,203 @@ fn try_parse_type_name(s: &str) -> Option<(TypeAscription, &str)> {
     None
 }
 
-// alt: atom // atom // ... — higher precedence than ascribe
+// alt: or_expr // or_expr — unwrap opt or use fallback
 fn parse_alt(s: &str) -> Result<(Expr, &str)> {
-    let (left, rest) = parse_atom(s)?;
+    let (left, rest) = parse_or(s)?;
     let rest = rest.trim_start();
     if let Some(after) = rest.strip_prefix("//") {
-        let (right, rest2) = parse_atom(after.trim_start())?;
+        let (right, rest2) = parse_or(after.trim_start())?;
         Ok((Expr::Alt(Box::new(left), Box::new(right)), rest2))
     } else {
         Ok((left, rest))
     }
 }
 
-// atom: dotchain | constructors | some(pipe) | none
+// or: and (or and)*
+fn parse_or(s: &str) -> Result<(Expr, &str)> {
+    let (mut left, mut rest) = parse_and(s)?;
+    loop {
+        let r = rest.trim_start();
+        if let Some(after) = r.strip_prefix("or") {
+            if after
+                .chars()
+                .next()
+                .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+            {
+                let (right, rest2) = parse_and(after.trim_start())?;
+                left = Expr::BinBool(BoolOp::Or, Box::new(left), Box::new(right));
+                rest = rest2;
+                continue;
+            }
+        }
+        break;
+    }
+    Ok((left, rest))
+}
+
+// and: not_expr (and not_expr)*
+fn parse_and(s: &str) -> Result<(Expr, &str)> {
+    let (mut left, mut rest) = parse_not(s)?;
+    loop {
+        let r = rest.trim_start();
+        if let Some(after) = r.strip_prefix("and") {
+            if after
+                .chars()
+                .next()
+                .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+            {
+                let (right, rest2) = parse_not(after.trim_start())?;
+                left = Expr::BinBool(BoolOp::And, Box::new(left), Box::new(right));
+                rest = rest2;
+                continue;
+            }
+        }
+        break;
+    }
+    Ok((left, rest))
+}
+
+// not: "not" not_expr | cmp
+fn parse_not(s: &str) -> Result<(Expr, &str)> {
+    let s = s.trim_start();
+    if let Some(after) = s.strip_prefix("not") {
+        if after
+            .chars()
+            .next()
+            .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+        {
+            let (inner, rest) = parse_not(after.trim_start())?;
+            return Ok((Expr::Not(Box::new(inner)), rest));
+        }
+    }
+    parse_cmp(s)
+}
+
+// cmp: add op add (single comparison, no chaining)
+fn parse_cmp(s: &str) -> Result<(Expr, &str)> {
+    let (left, rest) = parse_add(s)?;
+    let rest_t = rest.trim_start();
+
+    // Check two-char operators before one-char to avoid ambiguity
+    let (op, after_op) = if let Some(r) = rest_t.strip_prefix("==") {
+        (CmpOp::Eq, r)
+    } else if let Some(r) = rest_t.strip_prefix("!=") {
+        (CmpOp::Ne, r)
+    } else if let Some(r) = rest_t.strip_prefix("<=") {
+        (CmpOp::Le, r)
+    } else if let Some(r) = rest_t.strip_prefix(">=") {
+        (CmpOp::Ge, r)
+    } else if let Some(r) = rest_t.strip_prefix('<') {
+        (CmpOp::Lt, r)
+    } else if let Some(r) = rest_t.strip_prefix('>') {
+        (CmpOp::Gt, r)
+    } else {
+        return Ok((left, rest));
+    };
+
+    let (right, rest2) = parse_add(after_op.trim_start())?;
+    Ok((Expr::BinCmp(op, Box::new(left), Box::new(right)), rest2))
+}
+
+// add: mul ((+ | -) mul)*
+fn parse_add(s: &str) -> Result<(Expr, &str)> {
+    let (mut left, mut rest) = parse_mul(s)?;
+    loop {
+        let r = rest.trim_start();
+        if let Some(after) = r.strip_prefix('+') {
+            let (right, rest2) = parse_mul(after.trim_start())?;
+            left = Expr::BinArith(ArithOp::Add, Box::new(left), Box::new(right));
+            rest = rest2;
+        } else if r.starts_with('-') && !r.starts_with("->") {
+            let after = &r[1..];
+            let (right, rest2) = parse_mul(after.trim_start())?;
+            left = Expr::BinArith(ArithOp::Sub, Box::new(left), Box::new(right));
+            rest = rest2;
+        } else {
+            break;
+        }
+    }
+    Ok((left, rest))
+}
+
+// mul: atom ((* | / | %) atom)*
+fn parse_mul(s: &str) -> Result<(Expr, &str)> {
+    let (mut left, mut rest) = parse_atom(s)?;
+    loop {
+        let r = rest.trim_start();
+        if let Some(after) = r.strip_prefix('*') {
+            let (right, rest2) = parse_atom(after.trim_start())?;
+            left = Expr::BinArith(ArithOp::Mul, Box::new(left), Box::new(right));
+            rest = rest2;
+        } else if r.starts_with('/') && !r.starts_with("//") {
+            let after = &r[1..];
+            let (right, rest2) = parse_atom(after.trim_start())?;
+            left = Expr::BinArith(ArithOp::Div, Box::new(left), Box::new(right));
+            rest = rest2;
+        } else if let Some(after) = r.strip_prefix('%') {
+            let (right, rest2) = parse_atom(after.trim_start())?;
+            left = Expr::BinArith(ArithOp::Rem, Box::new(left), Box::new(right));
+            rest = rest2;
+        } else {
+            break;
+        }
+    }
+    Ok((left, rest))
+}
+
+// atom: literals | select | some | none | principal | blob | variant | record | vec | dotchain
 fn parse_atom(s: &str) -> Result<(Expr, &str)> {
     let s = s.trim_start();
+
+    // Parenthesised sub-expression
+    if let Some(after) = s.strip_prefix('(') {
+        let (inner, rest) = parse_pipe(after.trim_start())?;
+        let rest = rest.trim_start();
+        let rest = rest
+            .strip_prefix(')')
+            .ok_or_else(|| anyhow::anyhow!("expected ')' to close parenthesised expression"))?;
+        return Ok((inner, rest));
+    }
+
+    // `true` / `false` boolean literals
+    if let Some(after) = s.strip_prefix("true") {
+        if after
+            .chars()
+            .next()
+            .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+        {
+            return Ok((Expr::Literal(IDLValue::Bool(true)), after));
+        }
+    }
+    if let Some(after) = s.strip_prefix("false") {
+        if after
+            .chars()
+            .next()
+            .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+        {
+            return Ok((Expr::Literal(IDLValue::Bool(false)), after));
+        }
+    }
+
+    // Non-negative integer literal: digits only
+    if s.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+        let num_end = s
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(s.len());
+        let num_str = &s[..num_end];
+        let rest = &s[num_end..];
+        return Ok((Expr::Literal(IDLValue::Number(num_str.to_string())), rest));
+    }
+
+    // `select(pipe)`
+    if let Some(after) = s.strip_prefix("select(") {
+        let (pred, rest) = parse_pipe(after.trim_start())?;
+        let rest = rest.trim_start();
+        let rest = rest
+            .strip_prefix(')')
+            .ok_or_else(|| anyhow::anyhow!("expected ')' after select(...)"))?;
+        return Ok((Expr::Select(Box::new(pred)), rest));
+    }
 
     // `none` keyword (not followed by alphanumeric or '_')
     if let Some(after) = s.strip_prefix("none") {
@@ -445,6 +665,168 @@ fn hex_nibble(b: u8) -> Result<u8> {
 }
 
 // ---------------------------------------------------------------------------
+// Numeric intermediate representation (bigint-during-evaluation)
+// ---------------------------------------------------------------------------
+
+enum Num {
+    Unsigned(BigUint),
+    Signed(BigInt),
+    Float(f64),
+}
+
+fn to_num(val: &IDLValue) -> Result<Num> {
+    match val {
+        IDLValue::Nat(n) => Ok(Num::Unsigned(n.0.clone())),
+        IDLValue::Int(n) => Ok(Num::Signed(n.0.clone())),
+        IDLValue::Nat8(n) => Ok(Num::Unsigned(BigUint::from(*n as u64))),
+        IDLValue::Nat16(n) => Ok(Num::Unsigned(BigUint::from(*n as u64))),
+        IDLValue::Nat32(n) => Ok(Num::Unsigned(BigUint::from(*n as u64))),
+        IDLValue::Nat64(n) => Ok(Num::Unsigned(BigUint::from(*n))),
+        IDLValue::Int8(n) => Ok(Num::Signed(BigInt::from(*n as i64))),
+        IDLValue::Int16(n) => Ok(Num::Signed(BigInt::from(*n as i64))),
+        IDLValue::Int32(n) => Ok(Num::Signed(BigInt::from(*n as i64))),
+        IDLValue::Int64(n) => Ok(Num::Signed(BigInt::from(*n))),
+        IDLValue::Float32(f) => Ok(Num::Float(*f as f64)),
+        IDLValue::Float64(f) => Ok(Num::Float(*f)),
+        IDLValue::Number(s) => {
+            if s.starts_with('-') {
+                let n: BigInt = s
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("cannot parse number {:?}", s))?;
+                Ok(Num::Signed(n))
+            } else {
+                let n: BigUint = s
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("cannot parse number {:?}", s))?;
+                Ok(Num::Unsigned(n))
+            }
+        }
+        other => bail!(
+            "arithmetic requires a numeric value, got {}",
+            type_name(other)
+        ),
+    }
+}
+
+fn from_num(n: Num) -> IDLValue {
+    match n {
+        Num::Unsigned(u) => IDLValue::Nat(candid::Nat(u)),
+        Num::Signed(i) => IDLValue::Int(candid::Int(i)),
+        Num::Float(f) => IDLValue::Float64(f),
+    }
+}
+
+fn num_to_bigint(n: Num) -> BigInt {
+    match n {
+        Num::Signed(i) => i,
+        Num::Unsigned(u) => BigInt::from(u),
+        Num::Float(_) => panic!("float should not reach num_to_bigint"),
+    }
+}
+
+fn eval_arith(op: ArithOp, a: Num, b: Num) -> Result<Num> {
+    match (a, b) {
+        // Float ↔ int mixing is an error
+        (Num::Float(_), Num::Unsigned(_))
+        | (Num::Float(_), Num::Signed(_))
+        | (Num::Unsigned(_), Num::Float(_))
+        | (Num::Signed(_), Num::Float(_)) => bail!(
+            "cannot mix float and integer in arithmetic; use to_float or to_int for conversion"
+        ),
+        (Num::Float(af), Num::Float(bf)) => {
+            let result = match op {
+                ArithOp::Add => af + bf,
+                ArithOp::Sub => af - bf,
+                ArithOp::Mul => af * bf,
+                ArithOp::Div => af / bf,
+                ArithOp::Rem => af % bf,
+            };
+            Ok(Num::Float(result))
+        }
+        (Num::Unsigned(a), Num::Unsigned(b)) => match op {
+            ArithOp::Add => Ok(Num::Unsigned(a + b)),
+            ArithOp::Sub => {
+                if a >= b {
+                    Ok(Num::Unsigned(a - b))
+                } else {
+                    // nat - nat with negative result: widen to signed
+                    let ai = BigInt::from(a);
+                    let bi = BigInt::from(b);
+                    Ok(Num::Signed(ai - bi))
+                }
+            }
+            ArithOp::Mul => Ok(Num::Unsigned(a * b)),
+            ArithOp::Div => {
+                if b == BigUint::from(0u64) {
+                    bail!("division by zero")
+                }
+                Ok(Num::Unsigned(a / b))
+            }
+            ArithOp::Rem => {
+                if b == BigUint::from(0u64) {
+                    bail!("modulo by zero")
+                }
+                Ok(Num::Unsigned(a % b))
+            }
+        },
+        (a, b) => {
+            // One or both signed: convert to BigInt
+            let ai = num_to_bigint(a);
+            let bi = num_to_bigint(b);
+            match op {
+                ArithOp::Add => Ok(Num::Signed(ai + bi)),
+                ArithOp::Sub => Ok(Num::Signed(ai - bi)),
+                ArithOp::Mul => Ok(Num::Signed(ai * bi)),
+                ArithOp::Div => {
+                    if bi == BigInt::from(0i64) {
+                        bail!("division by zero")
+                    }
+                    Ok(Num::Signed(ai / bi))
+                }
+                ArithOp::Rem => {
+                    if bi == BigInt::from(0i64) {
+                        bail!("modulo by zero")
+                    }
+                    Ok(Num::Signed(ai % bi))
+                }
+            }
+        }
+    }
+}
+
+fn eval_cmp(op: CmpOp, a: Num, b: Num) -> Result<bool> {
+    match (a, b) {
+        (Num::Float(_), Num::Unsigned(_))
+        | (Num::Float(_), Num::Signed(_))
+        | (Num::Unsigned(_), Num::Float(_))
+        | (Num::Signed(_), Num::Float(_)) => bail!(
+            "cannot compare float and integer; use to_float or to_int for conversion"
+        ),
+        (Num::Float(af), Num::Float(bf)) => Ok(match op {
+            CmpOp::Eq => af == bf,
+            CmpOp::Ne => af != bf,
+            CmpOp::Lt => af < bf,
+            CmpOp::Gt => af > bf,
+            CmpOp::Le => af <= bf,
+            CmpOp::Ge => af >= bf,
+        }),
+        (a, b) => {
+            // Convert both to BigInt for mixed signed/unsigned comparison
+            let ai = num_to_bigint(a);
+            let bi = num_to_bigint(b);
+            Ok(match op {
+                CmpOp::Eq => ai == bi,
+                CmpOp::Ne => ai != bi,
+                CmpOp::Lt => ai < bi,
+                CmpOp::Gt => ai > bi,
+                CmpOp::Le => ai <= bi,
+                CmpOp::Ge => ai >= bi,
+            })
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Evaluator
 // ---------------------------------------------------------------------------
 
@@ -613,6 +995,82 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
                 })
                 .collect()
         }
+
+        Expr::Literal(v) => Ok(vec![IDLArgs::new(&[v.clone()])]),
+
+        Expr::BinArith(op, left, right) => {
+            let l_results = eval_expr(left, args.clone())?;
+            if l_results.len() != 1 || l_results[0].args.len() != 1 {
+                bail!("arithmetic requires a single value on the left side");
+            }
+            let r_results = eval_expr(right, args)?;
+            if r_results.len() != 1 || r_results[0].args.len() != 1 {
+                bail!("arithmetic requires a single value on the right side");
+            }
+            let lv = to_num(&l_results[0].args[0])?;
+            let rv = to_num(&r_results[0].args[0])?;
+            let result = eval_arith(*op, lv, rv)?;
+            Ok(vec![IDLArgs::new(&[from_num(result)])])
+        }
+
+        Expr::BinCmp(op, left, right) => {
+            let l_results = eval_expr(left, args.clone())?;
+            if l_results.len() != 1 || l_results[0].args.len() != 1 {
+                bail!("comparison requires a single value on the left side");
+            }
+            let r_results = eval_expr(right, args)?;
+            if r_results.len() != 1 || r_results[0].args.len() != 1 {
+                bail!("comparison requires a single value on the right side");
+            }
+            let lv = to_num(&l_results[0].args[0])?;
+            let rv = to_num(&r_results[0].args[0])?;
+            let result = eval_cmp(*op, lv, rv)?;
+            Ok(vec![IDLArgs::new(&[IDLValue::Bool(result)])])
+        }
+
+        Expr::BinBool(op, left, right) => {
+            let lb = eval_single_bool(left, args.clone())?;
+            let rb = eval_single_bool(right, args)?;
+            let result = match op {
+                BoolOp::And => lb && rb,
+                BoolOp::Or => lb || rb,
+            };
+            Ok(vec![IDLArgs::new(&[IDLValue::Bool(result)])])
+        }
+
+        Expr::Not(inner) => {
+            let b = eval_single_bool(inner, args)?;
+            Ok(vec![IDLArgs::new(&[IDLValue::Bool(!b)])])
+        }
+
+        Expr::Select(pred) => {
+            let pred_result = eval_expr(pred, args.clone())?;
+            if pred_result.is_empty() {
+                return Ok(vec![]);
+            }
+            if pred_result.len() != 1 || pred_result[0].args.len() != 1 {
+                bail!("select predicate must produce a single boolean value");
+            }
+            match &pred_result[0].args[0] {
+                IDLValue::Bool(true) => Ok(vec![args]),
+                IDLValue::Bool(false) => Ok(vec![]),
+                other => bail!(
+                    "select predicate must return bool, got {}",
+                    type_name(other)
+                ),
+            }
+        }
+    }
+}
+
+fn eval_single_bool(expr: &Expr, args: IDLArgs) -> Result<bool> {
+    let results = eval_expr(expr, args)?;
+    if results.len() != 1 || results[0].args.len() != 1 {
+        bail!("boolean operation requires a single boolean value");
+    }
+    match &results[0].args[0] {
+        IDLValue::Bool(b) => Ok(*b),
+        other => bail!("expected bool, got {}", type_name(other)),
     }
 }
 

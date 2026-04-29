@@ -351,6 +351,7 @@ dependencies = [
  "candid_parser",
  "clap",
  "hex",
+ "num-bigint",
  "predicates",
 ]
 
