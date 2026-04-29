@@ -7,6 +7,7 @@ mod schema;
 
 use anyhow::Result;
 use clap::Parser;
+use std::io::IsTerminal;
 
 fn run() -> Result<()> {
     let args = cli::Args::parse();
@@ -23,6 +24,23 @@ fn run() -> Result<()> {
     let did_refs: Vec<&std::path::Path> = args.did.iter().map(|p| p.as_path()).collect();
     let schema = schema::SchemaResolver::load(&did_refs)?;
 
+    let is_tty = std::io::stdout().is_terminal();
+    let no_color = std::env::var("NO_COLOR").is_ok();
+
+    let use_color = match args.color {
+        cli::ColorMode::Always => true,
+        cli::ColorMode::Never => false,
+        cli::ColorMode::Auto => is_tty && !no_color,
+    };
+
+    let compact = args.compact;
+
+    let fmt_opts = output::FormatOpts {
+        color: use_color,
+        compact,
+        blob_threshold: args.blob_threshold,
+    };
+
     let stdin = std::io::stdin().lock();
     let reader = std::io::BufReader::new(stdin);
     let stream = input::stream(reader, input_format)?;
@@ -34,7 +52,7 @@ fn run() -> Result<()> {
         let args_val = value_result?;
         let results = query::evaluate(args_val, args.query.as_deref())?;
         for result in results {
-            output::emit(&mut out, &result, &output_format, &schema.hash_to_name)?;
+            output::emit(&mut out, &result, &output_format, &schema.hash_to_name, &fmt_opts)?;
         }
     }
 

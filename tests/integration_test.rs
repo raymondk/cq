@@ -2379,3 +2379,162 @@ fn cmp_mixed_types_error() {
         .stderr(contains("'=='"))
         .stderr(contains("text"));
 }
+
+// --- Slice 16: color, compact, blob-threshold ---
+
+#[test]
+fn compact_flag_single_line_record() {
+    cq()
+        .args(["-c"])
+        .write_stdin("(record { foo = 1 : nat })")
+        .assert()
+        .success()
+        .stdout("(record { foo = 1 : nat })\n");
+}
+
+#[test]
+fn compact_flag_single_line_vec() {
+    cq()
+        .args(["-c"])
+        .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(vec { 1 : nat; 2 : nat; 3 : nat })\n");
+}
+
+#[test]
+fn compact_long_form() {
+    cq()
+        .args(["--compact"])
+        .write_stdin("(record { foo = 1 : nat })")
+        .assert()
+        .success()
+        .stdout("(record { foo = 1 : nat })\n");
+}
+
+#[test]
+fn compact_round_trips_with_pretty() {
+    // Compact and pretty both produce valid parseable Candid.
+    // Pipe compact output back through cq to verify it parses.
+    let compact_out = cq()
+        .args(["-c"])
+        .write_stdin("(record { foo = 1 : nat; bar = \"hello\" })")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    cq()
+        .write_stdin(compact_out)
+        .assert()
+        .success()
+        .stdout("(record { bar = \"hello\"; foo = 1 : nat })\n");
+}
+
+#[test]
+fn color_never_no_ansi_codes() {
+    let out = cq()
+        .args(["--color", "never"])
+        .write_stdin("(record { foo = 1 : nat })")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let s = String::from_utf8(out).unwrap();
+    assert!(!s.contains('\x1b'), "expected no ANSI codes, got: {:?}", s);
+}
+
+#[test]
+fn color_always_adds_ansi_codes() {
+    let out = cq()
+        .args(["--color", "always"])
+        .write_stdin("(record { foo = 1 : nat })")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let s = String::from_utf8(out).unwrap();
+    assert!(s.contains('\x1b'), "expected ANSI codes, got: {:?}", s);
+}
+
+#[test]
+fn no_color_env_disables_auto_color() {
+    let out = cq()
+        .args(["--color", "auto"])
+        .env("NO_COLOR", "1")
+        .write_stdin("(record { foo = 1 : nat })")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let s = String::from_utf8(out).unwrap();
+    assert!(!s.contains('\x1b'), "expected no ANSI codes, got: {:?}", s);
+}
+
+#[test]
+fn color_always_overrides_no_color_env() {
+    // --color always ignores NO_COLOR
+    let out = cq()
+        .args(["--color", "always"])
+        .env("NO_COLOR", "1")
+        .write_stdin("(42 : nat)")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let s = String::from_utf8(out).unwrap();
+    assert!(s.contains('\x1b'), "expected ANSI codes even with NO_COLOR, got: {:?}", s);
+}
+
+#[test]
+fn blob_threshold_short_uses_blob_literal() {
+    // Blob <= 64 bytes uses blob "..." format
+    let out = cq()
+        .args(["-c", "--blob-threshold", "64"])
+        .write_stdin("(blob \"hello\")")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let s = String::from_utf8(out).unwrap();
+    assert!(s.starts_with("(blob \""), "expected blob literal, got: {:?}", s);
+    assert!(!s.contains("blob_hex"), "expected no blob_hex, got: {:?}", s);
+}
+
+#[test]
+fn blob_threshold_long_uses_blob_hex() {
+    // Blob > threshold uses blob_hex("...") format
+    // Create 5 bytes which is > threshold of 3
+    let out = cq()
+        .args(["-c", "--blob-threshold", "3"])
+        .write_stdin("(blob \"hello\")")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let s = String::from_utf8(out).unwrap();
+    assert!(s.contains("blob_hex"), "expected blob_hex for long blob, got: {:?}", s);
+    // hex of "hello" = 68656c6c6f
+    assert!(s.contains("68656c6c6f"), "expected hex encoding of hello, got: {:?}", s);
+}
+
+#[test]
+fn blob_threshold_zero_always_hex() {
+    let out = cq()
+        .args(["-c", "--blob-threshold", "0"])
+        .write_stdin("(blob \"x\")")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let s = String::from_utf8(out).unwrap();
+    assert!(s.contains("blob_hex"), "expected blob_hex with threshold=0, got: {:?}", s);
+}
