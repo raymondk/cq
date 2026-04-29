@@ -22,7 +22,10 @@ impl SchemaResolver {
                 .map_err(|e| anyhow::anyhow!("type error in {}: {e}", path.display()))?;
         }
         let hash_to_name = build_hash_map(&env);
-        Ok(SchemaResolver { type_env: env, hash_to_name })
+        Ok(SchemaResolver {
+            type_env: env,
+            hash_to_name,
+        })
     }
 }
 
@@ -49,7 +52,12 @@ fn collect_from_named(
     }
 }
 
-fn collect_labels(ty: &Type, env: &TypeEnv, map: &mut HashMap<u32, String>, visited: &mut HashSet<String>) {
+fn collect_labels(
+    ty: &Type,
+    env: &TypeEnv,
+    map: &mut HashMap<u32, String>,
+    visited: &mut HashSet<String>,
+) {
     match ty.as_ref() {
         TypeInner::Record(fields) | TypeInner::Variant(fields) => {
             for field in fields {

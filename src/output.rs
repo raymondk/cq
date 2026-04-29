@@ -81,7 +81,7 @@ fn field_label(opts: &FormatOpts, label: &Label) -> String {
 
 fn ident_string(name: &str) -> String {
     if name.chars().all(|c| c.is_alphanumeric() || c == '_')
-        && name.chars().next().map_or(false, |c| !c.is_ascii_digit())
+        && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
     {
         name.to_string()
     } else {
@@ -91,8 +91,8 @@ fn ident_string(name: &str) -> String {
 
 // Thousands-separator format used by candid for Nat16/32/64 and Int16/32/64.
 fn pp_num_str(s: &str) -> String {
-    if s.starts_with('-') {
-        return format!("-{}", pp_num_str(&s[1..]));
+    if let Some(stripped) = s.strip_prefix('-') {
+        return format!("-{}", pp_num_str(stripped));
     }
     let bytes = s.as_bytes();
     let groups: std::vec::Vec<&str> = bytes
@@ -142,7 +142,11 @@ fn is_tuple_record(fields: &[IDLField]) -> bool {
 fn format_blob_bytes(bytes: &[u8], opts: &FormatOpts) -> String {
     if bytes.len() > opts.blob_threshold {
         let hex_str = hex::encode(bytes);
-        format!("{}(\"{}\")", kw(opts, "blob_hex"), paint(opts, YELLOW, &hex_str))
+        format!(
+            "{}(\"{}\")",
+            kw(opts, "blob_hex"),
+            paint(opts, YELLOW, &hex_str)
+        )
     } else {
         let is_all_ascii = bytes
             .iter()
@@ -178,7 +182,11 @@ pub fn format_value(v: &IDLValue, opts: &FormatOpts, depth: usize) -> String {
         Number(n) => num_lit(opts, n),
         Int(n) => format!("{}{}", num_lit(opts, &n.to_string()), type_ann(opts, "int")),
         Nat(n) => format!("{}{}", num_lit(opts, &n.to_string()), type_ann(opts, "nat")),
-        Nat8(n) => format!("{}{}", num_lit(opts, &n.to_string()), type_ann(opts, "nat8")),
+        Nat8(n) => format!(
+            "{}{}",
+            num_lit(opts, &n.to_string()),
+            type_ann(opts, "nat8")
+        ),
         Nat16(n) => format!(
             "{}{}",
             num_lit(opts, &pp_num_str(&n.to_string())),
@@ -194,7 +202,11 @@ pub fn format_value(v: &IDLValue, opts: &FormatOpts, depth: usize) -> String {
             num_lit(opts, &pp_num_str(&n.to_string())),
             type_ann(opts, "nat64")
         ),
-        Int8(n) => format!("{}{}", num_lit(opts, &n.to_string()), type_ann(opts, "int8")),
+        Int8(n) => format!(
+            "{}{}",
+            num_lit(opts, &n.to_string()),
+            type_ann(opts, "int8")
+        ),
         Int16(n) => format!(
             "{}{}",
             num_lit(opts, &pp_num_str(&n.to_string())),
@@ -224,10 +236,19 @@ pub fn format_value(v: &IDLValue, opts: &FormatOpts, depth: usize) -> String {
         None => kw(opts, "null"),
         Reserved => format!("{}{}", kw(opts, "null"), type_ann(opts, "reserved")),
         Principal(p) => {
-            format!("{} {}", kw(opts, "principal"), principal_text(opts, &p.to_text()))
+            format!(
+                "{} {}",
+                kw(opts, "principal"),
+                principal_text(opts, &p.to_text())
+            )
         }
         Service(p) => format!("{} \"{}\"", kw(opts, "service"), p.to_text()),
-        Func(p, m) => format!("{} \"{}\".{}", kw(opts, "func"), p.to_text(), ident_string(m)),
+        Func(p, m) => format!(
+            "{} \"{}\".{}",
+            kw(opts, "func"),
+            p.to_text(),
+            ident_string(m)
+        ),
         Blob(bytes) => format_blob_bytes(bytes, opts),
         Opt(inner) => {
             let inner_str = format_value(inner, opts, depth);
@@ -346,11 +367,7 @@ fn format_variant(field: &IDLField, opts: &FormatOpts, depth: usize) -> String {
 }
 
 pub fn format_args(args: &IDLArgs, opts: &FormatOpts) -> String {
-    let parts: Vec<String> = args
-        .args
-        .iter()
-        .map(|v| format_value(v, opts, 0))
-        .collect();
+    let parts: Vec<String> = args.args.iter().map(|v| format_value(v, opts, 0)).collect();
     if opts.compact || parts.len() <= 1 {
         format!("({})", parts.join(", "))
     } else {
@@ -425,7 +442,9 @@ fn resolve_value(v: &IDLValue, map: &HashMap<u32, String>) -> IDLValue {
             *idx,
         )),
         IDLValue::Opt(inner) => IDLValue::Opt(Box::new(resolve_value(inner, map))),
-        IDLValue::Vec(items) => IDLValue::Vec(items.iter().map(|v| resolve_value(v, map)).collect()),
+        IDLValue::Vec(items) => {
+            IDLValue::Vec(items.iter().map(|v| resolve_value(v, map)).collect())
+        }
         other => other.clone(),
     }
 }

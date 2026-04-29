@@ -9,8 +9,7 @@ fn cq() -> Command {
 
 #[test]
 fn identity_record() {
-    cq()
-        .write_stdin("(record { foo = 1 : nat })")
+    cq().write_stdin("(record { foo = 1 : nat })")
         .assert()
         .success()
         .stdout("(record { foo = 1 : nat })\n");
@@ -18,8 +17,7 @@ fn identity_record() {
 
 #[test]
 fn identity_variant() {
-    cq()
-        .write_stdin("(variant { Ok = \"hello\" })")
+    cq().write_stdin("(variant { Ok = \"hello\" })")
         .assert()
         .success()
         .stdout("(variant { Ok = \"hello\" })\n");
@@ -27,8 +25,7 @@ fn identity_variant() {
 
 #[test]
 fn identity_opt_some() {
-    cq()
-        .write_stdin("(opt (42 : nat32))")
+    cq().write_stdin("(opt (42 : nat32))")
         .assert()
         .success()
         .stdout("(opt (42 : nat32))\n");
@@ -36,8 +33,7 @@ fn identity_opt_some() {
 
 #[test]
 fn identity_vec() {
-    cq()
-        .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
+    cq().write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
         .assert()
         .success()
         .stdout("(vec { 1 : nat; 2 : nat; 3 : nat })\n");
@@ -45,8 +41,7 @@ fn identity_vec() {
 
 #[test]
 fn identity_bool() {
-    cq()
-        .write_stdin("(true)")
+    cq().write_stdin("(true)")
         .assert()
         .success()
         .stdout("(true)\n");
@@ -54,8 +49,7 @@ fn identity_bool() {
 
 #[test]
 fn identity_int() {
-    cq()
-        .write_stdin("(42 : int)")
+    cq().write_stdin("(42 : int)")
         .assert()
         .success()
         .stdout("(42 : int)\n");
@@ -63,8 +57,7 @@ fn identity_int() {
 
 #[test]
 fn identity_text() {
-    cq()
-        .write_stdin("(\"hello world\")")
+    cq().write_stdin("(\"hello world\")")
         .assert()
         .success()
         .stdout("(\"hello world\")\n");
@@ -72,8 +65,7 @@ fn identity_text() {
 
 #[test]
 fn identity_principal() {
-    cq()
-        .write_stdin("(principal \"aaaaa-aa\")")
+    cq().write_stdin("(principal \"aaaaa-aa\")")
         .assert()
         .success()
         .stdout("(principal \"aaaaa-aa\")\n");
@@ -81,8 +73,7 @@ fn identity_principal() {
 
 #[test]
 fn identity_blob() {
-    cq()
-        .write_stdin("(blob \"hello\")")
+    cq().write_stdin("(blob \"hello\")")
         .assert()
         .success()
         .stdout("(blob \"hello\")\n");
@@ -90,8 +81,7 @@ fn identity_blob() {
 
 #[test]
 fn identity_null() {
-    cq()
-        .write_stdin("(null)")
+    cq().write_stdin("(null)")
         .assert()
         .success()
         .stdout("(null : null)\n");
@@ -101,8 +91,7 @@ fn identity_null() {
 
 #[test]
 fn parse_failure_exits_nonzero() {
-    cq()
-        .write_stdin("not valid candid")
+    cq().write_stdin("not valid candid")
         .assert()
         .failure()
         .stderr(contains("failed to parse Candid text"));
@@ -110,17 +99,12 @@ fn parse_failure_exits_nonzero() {
 
 #[test]
 fn empty_input_produces_no_output() {
-    cq()
-        .write_stdin("")
-        .assert()
-        .success()
-        .stdout("");
+    cq().write_stdin("").assert().success().stdout("");
 }
 
 #[test]
 fn invalid_hex_odd_length_errors() {
-    cq()
-        .arg("--input-format")
+    cq().arg("--input-format")
         .arg("hex")
         .write_stdin("abc")
         .assert()
@@ -130,8 +114,7 @@ fn invalid_hex_odd_length_errors() {
 
 #[test]
 fn invalid_hex_non_hex_chars_errors() {
-    cq()
-        .arg("--input-format")
+    cq().arg("--input-format")
         .arg("hex")
         .write_stdin("zz")
         .assert()
@@ -141,8 +124,7 @@ fn invalid_hex_non_hex_chars_errors() {
 
 #[test]
 fn truncated_binary_errors() {
-    cq()
-        .arg("--input-format")
+    cq().arg("--input-format")
         .arg("bin")
         .write_stdin("DIDL")
         .assert()
@@ -154,8 +136,7 @@ fn truncated_binary_errors() {
 
 #[test]
 fn output_text_alias_for_candid() {
-    cq()
-        .arg("--output")
+    cq().arg("--output")
         .arg("text")
         .write_stdin("(42 : nat)")
         .assert()
@@ -165,8 +146,7 @@ fn output_text_alias_for_candid() {
 
 #[test]
 fn input_format_candid_alias_for_text() {
-    cq()
-        .arg("--input-format")
+    cq().arg("--input-format")
         .arg("candid")
         .write_stdin("(42 : nat)")
         .assert()
@@ -178,8 +158,7 @@ fn input_format_candid_alias_for_text() {
 
 #[test]
 fn multi_value_text_input() {
-    cq()
-        .write_stdin("(42 : nat)(99 : nat)")
+    cq().write_stdin("(42 : nat)(99 : nat)")
         .assert()
         .success()
         .stdout("(42 : nat)\n(99 : nat)\n");
@@ -187,8 +166,7 @@ fn multi_value_text_input() {
 
 #[test]
 fn multi_value_text_input_newline_separated() {
-    cq()
-        .write_stdin("(42 : nat)\n(99 : nat)\n")
+    cq().write_stdin("(42 : nat)\n(99 : nat)\n")
         .assert()
         .success()
         .stdout("(42 : nat)\n(99 : nat)\n");
@@ -197,8 +175,7 @@ fn multi_value_text_input_newline_separated() {
 #[test]
 fn multi_value_hex_input() {
     // Two frames: (42 : nat) and (99 : nat)
-    cq()
-        .arg("--input-format")
+    cq().arg("--input-format")
         .arg("hex")
         .write_stdin("4449444c00017d2a\n4449444c00017d63\n")
         .assert()
@@ -213,8 +190,7 @@ fn multi_value_bin_parse_and_advance() {
     let frame2 = hex::decode("4449444c00017d63").unwrap();
     let mut both = frame1;
     both.extend_from_slice(&frame2);
-    cq()
-        .arg("--input-format")
+    cq().arg("--input-format")
         .arg("bin")
         .write_stdin(both.as_slice())
         .assert()
@@ -240,8 +216,7 @@ fn bin_for_nat42() -> Vec<u8> {
 
 #[test]
 fn roundtrip_text_to_text() {
-    cq()
-        .write_stdin(text_for_nat42())
+    cq().write_stdin(text_for_nat42())
         .assert()
         .success()
         .stdout(format!("{}\n", text_for_nat42()));
@@ -249,8 +224,7 @@ fn roundtrip_text_to_text() {
 
 #[test]
 fn roundtrip_text_to_hex() {
-    cq()
-        .arg("--output")
+    cq().arg("--output")
         .arg("hex")
         .write_stdin(text_for_nat42())
         .assert()
@@ -260,8 +234,7 @@ fn roundtrip_text_to_hex() {
 
 #[test]
 fn roundtrip_text_to_bin() {
-    cq()
-        .arg("--output")
+    cq().arg("--output")
         .arg("bin")
         .write_stdin(text_for_nat42())
         .assert()
@@ -271,8 +244,7 @@ fn roundtrip_text_to_bin() {
 
 #[test]
 fn roundtrip_hex_to_text() {
-    cq()
-        .arg("--input-format")
+    cq().arg("--input-format")
         .arg("hex")
         .write_stdin(hex_for_nat42())
         .assert()
@@ -282,8 +254,7 @@ fn roundtrip_hex_to_text() {
 
 #[test]
 fn roundtrip_hex_to_hex() {
-    cq()
-        .arg("--input-format")
+    cq().arg("--input-format")
         .arg("hex")
         .arg("--output")
         .arg("hex")
@@ -295,8 +266,7 @@ fn roundtrip_hex_to_hex() {
 
 #[test]
 fn roundtrip_hex_to_bin() {
-    cq()
-        .arg("--input-format")
+    cq().arg("--input-format")
         .arg("hex")
         .arg("--output")
         .arg("bin")
@@ -308,8 +278,7 @@ fn roundtrip_hex_to_bin() {
 
 #[test]
 fn roundtrip_bin_to_text() {
-    cq()
-        .arg("--input-format")
+    cq().arg("--input-format")
         .arg("bin")
         .write_stdin(bin_for_nat42().as_slice())
         .assert()
@@ -319,8 +288,7 @@ fn roundtrip_bin_to_text() {
 
 #[test]
 fn roundtrip_bin_to_hex() {
-    cq()
-        .arg("--input-format")
+    cq().arg("--input-format")
         .arg("bin")
         .arg("--output")
         .arg("hex")
@@ -332,8 +300,7 @@ fn roundtrip_bin_to_hex() {
 
 #[test]
 fn roundtrip_bin_to_bin() {
-    cq()
-        .arg("--input-format")
+    cq().arg("--input-format")
         .arg("bin")
         .arg("--output")
         .arg("bin")
@@ -347,8 +314,7 @@ fn roundtrip_bin_to_bin() {
 
 #[test]
 fn field_access_simple() {
-    cq()
-        .args([".foo"])
+    cq().args([".foo"])
         .write_stdin("(record { foo = 42 : nat })")
         .assert()
         .success()
@@ -357,8 +323,7 @@ fn field_access_simple() {
 
 #[test]
 fn field_access_chained() {
-    cq()
-        .args([".foo.bar"])
+    cq().args([".foo.bar"])
         .write_stdin("(record { foo = record { bar = 7 : nat } })")
         .assert()
         .success()
@@ -367,8 +332,7 @@ fn field_access_chained() {
 
 #[test]
 fn field_access_three_levels() {
-    cq()
-        .args([".a.b.c"])
+    cq().args([".a.b.c"])
         .write_stdin("(record { a = record { b = record { c = 99 : nat } } })")
         .assert()
         .success()
@@ -377,8 +341,7 @@ fn field_access_three_levels() {
 
 #[test]
 fn pipe_field_access() {
-    cq()
-        .args([".foo | .bar"])
+    cq().args([".foo | .bar"])
         .write_stdin("(record { foo = record { bar = 3 : nat } })")
         .assert()
         .success()
@@ -387,8 +350,7 @@ fn pipe_field_access() {
 
 #[test]
 fn pipe_identity_passthrough() {
-    cq()
-        .args([". | .foo"])
+    cq().args([". | .foo"])
         .write_stdin("(record { foo = 5 : nat })")
         .assert()
         .success()
@@ -397,8 +359,7 @@ fn pipe_identity_passthrough() {
 
 #[test]
 fn identity_explicit_dot() {
-    cq()
-        .args(["."])
+    cq().args(["."])
         .write_stdin("(record { foo = 1 : nat })")
         .assert()
         .success()
@@ -407,8 +368,7 @@ fn identity_explicit_dot() {
 
 #[test]
 fn field_access_unknown_field_errors() {
-    cq()
-        .args([".missing"])
+    cq().args([".missing"])
         .write_stdin("(record { foo = 1 : nat })")
         .assert()
         .failure()
@@ -418,18 +378,18 @@ fn field_access_unknown_field_errors() {
 
 #[test]
 fn field_access_non_record_errors() {
-    cq()
-        .args([".foo"])
+    cq().args([".foo"])
         .write_stdin("(42 : nat)")
         .assert()
         .failure()
-        .stderr(predicates::str::contains("field access '.foo' requires a record"));
+        .stderr(predicates::str::contains(
+            "field access '.foo' requires a record",
+        ));
 }
 
 #[test]
 fn field_access_text_field() {
-    cq()
-        .args([".name"])
+    cq().args([".name"])
         .write_stdin("(record { name = \"alice\" })")
         .assert()
         .success()
@@ -462,8 +422,7 @@ fn field_access_round_trip_pipe_cq() {
 
 #[test]
 fn vec_index_first() {
-    cq()
-        .args([".[0]"])
+    cq().args([".[0]"])
         .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
         .assert()
         .success()
@@ -472,8 +431,7 @@ fn vec_index_first() {
 
 #[test]
 fn vec_index_last() {
-    cq()
-        .args([".[2]"])
+    cq().args([".[2]"])
         .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
         .assert()
         .success()
@@ -482,8 +440,7 @@ fn vec_index_last() {
 
 #[test]
 fn vec_index_out_of_bounds_errors() {
-    cq()
-        .args([".[5]"])
+    cq().args([".[5]"])
         .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
         .assert()
         .failure()
@@ -492,8 +449,7 @@ fn vec_index_out_of_bounds_errors() {
 
 #[test]
 fn vec_slice_returns_subvec() {
-    cq()
-        .args([".[1:3]"])
+    cq().args([".[1:3]"])
         .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat; 4 : nat })")
         .assert()
         .success()
@@ -502,8 +458,7 @@ fn vec_slice_returns_subvec() {
 
 #[test]
 fn vec_iter_produces_stream() {
-    cq()
-        .args([".[]"])
+    cq().args([".[]"])
         .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
         .assert()
         .success()
@@ -512,8 +467,7 @@ fn vec_iter_produces_stream() {
 
 #[test]
 fn vec_iter_empty_vec_no_output() {
-    cq()
-        .args([".[]"])
+    cq().args([".[]"])
         .write_stdin("(vec {})")
         .assert()
         .success()
@@ -522,8 +476,7 @@ fn vec_iter_empty_vec_no_output() {
 
 #[test]
 fn vec_iter_wrong_type_errors() {
-    cq()
-        .args([".[]"])
+    cq().args([".[]"])
         .write_stdin("(42 : nat)")
         .assert()
         .failure()
@@ -532,8 +485,7 @@ fn vec_iter_wrong_type_errors() {
 
 #[test]
 fn vec_index_wrong_type_errors() {
-    cq()
-        .args([".[0]"])
+    cq().args([".[0]"])
         .write_stdin("(42 : nat)")
         .assert()
         .failure()
@@ -551,8 +503,7 @@ fn vec_iter_round_trip() {
         .get_output()
         .stdout
         .clone();
-    cq()
-        .args(["."])
+    cq().args(["."])
         .write_stdin(exploded.as_slice())
         .assert()
         .success()
@@ -561,8 +512,7 @@ fn vec_iter_round_trip() {
 
 #[test]
 fn vec_chained_index_then_field() {
-    cq()
-        .args([".[0].name"])
+    cq().args([".[0].name"])
         .write_stdin("(vec { record { name = \"alice\" } })")
         .assert()
         .success()
@@ -571,8 +521,7 @@ fn vec_chained_index_then_field() {
 
 #[test]
 fn vec_field_then_index() {
-    cq()
-        .args([".items.[1]"])
+    cq().args([".items.[1]"])
         .write_stdin("(record { items = vec { 10 : nat; 20 : nat; 30 : nat } })")
         .assert()
         .success()
@@ -583,8 +532,7 @@ fn vec_field_then_index() {
 
 #[test]
 fn variant_tag_access_matching_arm() {
-    cq()
-        .args([".Ok"])
+    cq().args([".Ok"])
         .write_stdin("(variant { Ok = \"hello\" })")
         .assert()
         .success()
@@ -593,8 +541,7 @@ fn variant_tag_access_matching_arm() {
 
 #[test]
 fn variant_tag_access_wrong_arm_errors() {
-    cq()
-        .args([".Err"])
+    cq().args([".Err"])
         .write_stdin("(variant { Ok = \"hello\" })")
         .assert()
         .failure()
@@ -605,8 +552,7 @@ fn variant_tag_access_wrong_arm_errors() {
 
 #[test]
 fn variant_null_payload_returns_null() {
-    cq()
-        .args([".Pending"])
+    cq().args([".Pending"])
         .write_stdin("(variant { Pending })")
         .assert()
         .success()
@@ -615,8 +561,7 @@ fn variant_null_payload_returns_null() {
 
 #[test]
 fn variant_tag_optional_skip_on_mismatch() {
-    cq()
-        .args([".Err?"])
+    cq().args([".Err?"])
         .write_stdin("(variant { Ok = \"hello\" })")
         .assert()
         .success()
@@ -625,8 +570,7 @@ fn variant_tag_optional_skip_on_mismatch() {
 
 #[test]
 fn variant_tag_optional_returns_payload_on_match() {
-    cq()
-        .args([".Ok?"])
+    cq().args([".Ok?"])
         .write_stdin("(variant { Ok = \"hello\" })")
         .assert()
         .success()
@@ -636,8 +580,7 @@ fn variant_tag_optional_returns_payload_on_match() {
 #[test]
 fn variant_field_access_regression() {
     // .Tag on a record still works like slice 3 field access
-    cq()
-        .args([".foo"])
+    cq().args([".foo"])
         .write_stdin("(record { foo = 42 : nat })")
         .assert()
         .success()
@@ -647,8 +590,7 @@ fn variant_field_access_regression() {
 #[test]
 fn variant_chained_optional_extracts_nested_field() {
     // .kind.Transfer?.amount — skips chain if tag doesn't match
-    cq()
-        .args([".kind.Transfer?.amount"])
+    cq().args([".kind.Transfer?.amount"])
         .write_stdin("(record { kind = variant { Transfer = record { amount = 100 : nat } } })")
         .assert()
         .success()
@@ -657,8 +599,7 @@ fn variant_chained_optional_extracts_nested_field() {
 
 #[test]
 fn variant_chained_optional_empty_on_mismatch() {
-    cq()
-        .args([".Transfer?.amount"])
+    cq().args([".Transfer?.amount"])
         .write_stdin("(variant { Pending })")
         .assert()
         .success()
@@ -676,8 +617,7 @@ fn variant_round_trip_via_tag_access() {
         .stdout
         .clone();
     // piping extracted payload through cq identity is lossless
-    cq()
-        .args(["."])
+    cq().args(["."])
         .write_stdin(extracted.as_slice())
         .assert()
         .success()
@@ -701,8 +641,7 @@ fn round_trip_text_via_hex_preserves_hash() {
         .clone();
     let hex_str = String::from_utf8(output).unwrap();
     // Hash of "foo" is 5_097_222; no schema means field name is lost.
-    cq()
-        .arg("--input-format")
+    cq().arg("--input-format")
         .arg("hex")
         .write_stdin(hex_str.trim())
         .assert()
@@ -721,8 +660,7 @@ fn round_trip_text_to_text_is_identity() {
         .stdout
         .clone();
     let first_str = String::from_utf8(first).unwrap();
-    cq()
-        .write_stdin(first_str.trim())
+    cq().write_stdin(first_str.trim())
         .assert()
         .success()
         .stdout(format!("{}\n", first_str.trim()));
@@ -732,8 +670,7 @@ fn round_trip_text_to_text_is_identity() {
 
 #[test]
 fn construct_record_projects_fields() {
-    cq()
-        .args(["{x: .a, y: .b}"])
+    cq().args(["{x: .a, y: .b}"])
         .write_stdin("(record { a = 1 : nat; b = 2 : nat })")
         .assert()
         .success()
@@ -742,8 +679,7 @@ fn construct_record_projects_fields() {
 
 #[test]
 fn construct_record_empty() {
-    cq()
-        .args(["{}"])
+    cq().args(["{}"])
         .write_stdin("(42 : nat)")
         .assert()
         .success()
@@ -752,8 +688,7 @@ fn construct_record_empty() {
 
 #[test]
 fn construct_record_with_identity() {
-    cq()
-        .args(["{val: .}"])
+    cq().args(["{val: .}"])
         .write_stdin("(42 : nat)")
         .assert()
         .success()
@@ -762,8 +697,7 @@ fn construct_record_with_identity() {
 
 #[test]
 fn construct_vec_from_fields() {
-    cq()
-        .args(["[.a, .b, .c]"])
+    cq().args(["[.a, .b, .c]"])
         .write_stdin("(record { a = 1 : nat; b = 2 : nat; c = 3 : nat })")
         .assert()
         .success()
@@ -772,8 +706,7 @@ fn construct_vec_from_fields() {
 
 #[test]
 fn construct_vec_empty() {
-    cq()
-        .args(["[]"])
+    cq().args(["[]"])
         .write_stdin("(42 : nat)")
         .assert()
         .success()
@@ -782,8 +715,7 @@ fn construct_vec_empty() {
 
 #[test]
 fn construct_variant_with_payload() {
-    cq()
-        .args(["variant { Ok = . }"])
+    cq().args(["variant { Ok = . }"])
         .write_stdin("(42 : nat)")
         .assert()
         .success()
@@ -792,8 +724,7 @@ fn construct_variant_with_payload() {
 
 #[test]
 fn construct_variant_null_payload() {
-    cq()
-        .args(["variant { Pending }"])
+    cq().args(["variant { Pending }"])
         .write_stdin("(null)")
         .assert()
         .success()
@@ -802,8 +733,7 @@ fn construct_variant_null_payload() {
 
 #[test]
 fn construct_principal_literal() {
-    cq()
-        .args(["principal \"aaaaa-aa\""])
+    cq().args(["principal \"aaaaa-aa\""])
         .write_stdin("(null)")
         .assert()
         .success()
@@ -812,8 +742,7 @@ fn construct_principal_literal() {
 
 #[test]
 fn construct_principal_invalid_errors() {
-    cq()
-        .args(["principal \"not-valid-principal\""])
+    cq().args(["principal \"not-valid-principal\""])
         .write_stdin("(null)")
         .assert()
         .failure()
@@ -822,8 +751,7 @@ fn construct_principal_invalid_errors() {
 
 #[test]
 fn construct_blob_string_literal() {
-    cq()
-        .args(["blob \"hello\""])
+    cq().args(["blob \"hello\""])
         .write_stdin("(null)")
         .assert()
         .success()
@@ -832,8 +760,7 @@ fn construct_blob_string_literal() {
 
 #[test]
 fn construct_blob_hex_escapes() {
-    cq()
-        .args(["blob \"\\00\\01\\02\""])
+    cq().args(["blob \"\\00\\01\\02\""])
         .write_stdin("(null)")
         .assert()
         .success()
@@ -842,8 +769,7 @@ fn construct_blob_hex_escapes() {
 
 #[test]
 fn construct_blob_hex_from_text_field() {
-    cq()
-        .args(["blob_hex(.hex)"])
+    cq().args(["blob_hex(.hex)"])
         .write_stdin("(record { hex = \"deadbeef\" })")
         .assert()
         .success()
@@ -852,8 +778,7 @@ fn construct_blob_hex_from_text_field() {
 
 #[test]
 fn construct_blob_hex_invalid_errors() {
-    cq()
-        .args(["blob_hex(.hex)"])
+    cq().args(["blob_hex(.hex)"])
         .write_stdin("(record { hex = \"not-hex\" })")
         .assert()
         .failure()
@@ -862,8 +787,7 @@ fn construct_blob_hex_invalid_errors() {
 
 #[test]
 fn ascribe_nat32() {
-    cq()
-        .args([". : nat32"])
+    cq().args([". : nat32"])
         .write_stdin("(42 : nat)")
         .assert()
         .success()
@@ -872,8 +796,7 @@ fn ascribe_nat32() {
 
 #[test]
 fn ascribe_nat8_out_of_range_errors() {
-    cq()
-        .args([". : nat8"])
+    cq().args([". : nat8"])
         .write_stdin("(256 : nat)")
         .assert()
         .failure()
@@ -882,8 +805,7 @@ fn ascribe_nat8_out_of_range_errors() {
 
 #[test]
 fn ascribe_in_record_field() {
-    cq()
-        .args(["{amount: .bal : nat32}"])
+    cq().args(["{amount: .bal : nat32}"])
         .write_stdin("(record { bal = 42 : nat })")
         .assert()
         .success()
@@ -893,8 +815,7 @@ fn ascribe_in_record_field() {
 #[test]
 fn construct_record_round_trip_through_field_access() {
     // Build a record then access a field to verify fidelity
-    cq()
-        .args(["{x: .a} | .x"])
+    cq().args(["{x: .a} | .x"])
         .write_stdin("(record { a = 99 : nat })")
         .assert()
         .success()
@@ -906,8 +827,7 @@ fn construct_record_round_trip_through_field_access() {
 #[test]
 fn opt_field_access_returns_wrapped_value() {
     // .field on an opt field returns the opt-wrapped value (lossless)
-    cq()
-        .args([".x"])
+    cq().args([".x"])
         .write_stdin("(record { x = opt 42 : opt nat })")
         .assert()
         .success()
@@ -916,8 +836,7 @@ fn opt_field_access_returns_wrapped_value() {
 
 #[test]
 fn opt_unwrap_some_returns_inner() {
-    cq()
-        .args([".x?"])
+    cq().args([".x?"])
         .write_stdin("(record { x = opt 42 : opt nat })")
         .assert()
         .success()
@@ -926,8 +845,7 @@ fn opt_unwrap_some_returns_inner() {
 
 #[test]
 fn opt_unwrap_none_produces_no_output() {
-    cq()
-        .args([".x?"])
+    cq().args([".x?"])
         .write_stdin("(record { x = null : opt nat })")
         .assert()
         .success()
@@ -936,8 +854,7 @@ fn opt_unwrap_none_produces_no_output() {
 
 #[test]
 fn opt_assert_some_returns_inner() {
-    cq()
-        .args([".x!"])
+    cq().args([".x!"])
         .write_stdin("(record { x = opt 42 : opt nat })")
         .assert()
         .success()
@@ -946,8 +863,7 @@ fn opt_assert_some_returns_inner() {
 
 #[test]
 fn opt_assert_none_errors() {
-    cq()
-        .args([".x!"])
+    cq().args([".x!"])
         .write_stdin("(record { x = null : opt nat })")
         .assert()
         .failure()
@@ -957,8 +873,7 @@ fn opt_assert_none_errors() {
 #[test]
 fn opt_alt_some_returns_inner() {
     // .x // none — when x is Some, return the inner value (unwrapped)
-    cq()
-        .args([".x // none"])
+    cq().args([".x // none"])
         .write_stdin("(record { x = opt 42 : opt nat })")
         .assert()
         .success()
@@ -968,8 +883,7 @@ fn opt_alt_some_returns_inner() {
 #[test]
 fn opt_alt_none_returns_fallback() {
     // .x // none — when x is None, return the `none` literal
-    cq()
-        .args([".x // none"])
+    cq().args([".x // none"])
         .write_stdin("(record { x = null : opt nat })")
         .assert()
         .success()
@@ -978,8 +892,7 @@ fn opt_alt_none_returns_fallback() {
 
 #[test]
 fn opt_some_constructor_wraps_value() {
-    cq()
-        .args(["some(.)"])
+    cq().args(["some(.)"])
         .write_stdin("(42 : nat)")
         .assert()
         .success()
@@ -988,8 +901,7 @@ fn opt_some_constructor_wraps_value() {
 
 #[test]
 fn opt_none_literal() {
-    cq()
-        .args(["none"])
+    cq().args(["none"])
         .write_stdin("(42 : nat)")
         .assert()
         .success()
@@ -999,8 +911,7 @@ fn opt_none_literal() {
 #[test]
 fn opt_chained_unwrap_some_accesses_inner_field() {
     // .address?.city — when address is Some, unwrap and access city
-    cq()
-        .args([".address?.city"])
+    cq().args([".address?.city"])
         .write_stdin("(record { address = opt record { city = \"NYC\" } })")
         .assert()
         .success()
@@ -1010,8 +921,7 @@ fn opt_chained_unwrap_some_accesses_inner_field() {
 #[test]
 fn opt_chained_unwrap_none_produces_no_output() {
     // .address?.city — when address is None, produces nothing
-    cq()
-        .args([".address?.city"])
+    cq().args([".address?.city"])
         .write_stdin("(record { address = null : opt record {} })")
         .assert()
         .success()
@@ -1031,8 +941,7 @@ fn opt_some_round_trip() {
         .clone();
     let wrapped_str = String::from_utf8(wrapped).unwrap();
     // Use .? to unwrap the standalone opt value
-    cq()
-        .args([".?"])
+    cq().args([".?"])
         .write_stdin(wrapped_str.trim())
         .assert()
         .success()
@@ -1043,8 +952,7 @@ fn opt_some_round_trip() {
 
 #[test]
 fn arith_add_nat() {
-    cq()
-        .args([".a + .b"])
+    cq().args([".a + .b"])
         .write_stdin("(record { a = 10 : nat; b = 3 : nat })")
         .assert()
         .success()
@@ -1053,8 +961,7 @@ fn arith_add_nat() {
 
 #[test]
 fn arith_sub_nat_positive_result() {
-    cq()
-        .args([".a - .b"])
+    cq().args([".a - .b"])
         .write_stdin("(record { a = 10 : nat; b = 3 : nat })")
         .assert()
         .success()
@@ -1063,8 +970,7 @@ fn arith_sub_nat_positive_result() {
 
 #[test]
 fn arith_sub_nat_negative_result_widens_to_int() {
-    cq()
-        .args([".a - .b"])
+    cq().args([".a - .b"])
         .write_stdin("(record { a = 3 : nat; b = 10 : nat })")
         .assert()
         .success()
@@ -1073,8 +979,7 @@ fn arith_sub_nat_negative_result_widens_to_int() {
 
 #[test]
 fn arith_mul_nat() {
-    cq()
-        .args([".a * .b"])
+    cq().args([".a * .b"])
         .write_stdin("(record { a = 10 : nat; b = 3 : nat })")
         .assert()
         .success()
@@ -1083,8 +988,7 @@ fn arith_mul_nat() {
 
 #[test]
 fn arith_div_nat() {
-    cq()
-        .args([".a / .b"])
+    cq().args([".a / .b"])
         .write_stdin("(record { a = 10 : nat; b = 3 : nat })")
         .assert()
         .success()
@@ -1093,8 +997,7 @@ fn arith_div_nat() {
 
 #[test]
 fn arith_rem_nat() {
-    cq()
-        .args([".a % .b"])
+    cq().args([".a % .b"])
         .write_stdin("(record { a = 10 : nat; b = 3 : nat })")
         .assert()
         .success()
@@ -1103,8 +1006,7 @@ fn arith_rem_nat() {
 
 #[test]
 fn arith_add_literal() {
-    cq()
-        .args([". + 5"])
+    cq().args([". + 5"])
         .write_stdin("(10 : nat)")
         .assert()
         .success()
@@ -1114,8 +1016,7 @@ fn arith_add_literal() {
 #[test]
 fn arith_sized_integer_no_overflow_during_eval() {
     // nat8(200) + 100 = 300: no error during eval; result is nat, not nat8
-    cq()
-        .args([". + 100"])
+    cq().args([". + 100"])
         .write_stdin("(200 : nat8)")
         .assert()
         .success()
@@ -1125,8 +1026,7 @@ fn arith_sized_integer_no_overflow_during_eval() {
 #[test]
 fn arith_sized_integer_overflow_at_ascription() {
     // Overflow only errors when ascribed back to nat8
-    cq()
-        .args([". + 100 : nat8"])
+    cq().args([". + 100 : nat8"])
         .write_stdin("(200 : nat8)")
         .assert()
         .failure()
@@ -1135,8 +1035,7 @@ fn arith_sized_integer_overflow_at_ascription() {
 
 #[test]
 fn arith_float_int_mixing_errors() {
-    cq()
-        .args([".a + .b"])
+    cq().args([".a + .b"])
         .write_stdin("(record { a = 1.5 : float64; b = 3 : nat })")
         .assert()
         .failure()
@@ -1145,8 +1044,7 @@ fn arith_float_int_mixing_errors() {
 
 #[test]
 fn cmp_eq_false() {
-    cq()
-        .args([".a == .b"])
+    cq().args([".a == .b"])
         .write_stdin("(record { a = 10 : nat; b = 3 : nat })")
         .assert()
         .success()
@@ -1155,8 +1053,7 @@ fn cmp_eq_false() {
 
 #[test]
 fn cmp_eq_true() {
-    cq()
-        .args([".a == .b"])
+    cq().args([".a == .b"])
         .write_stdin("(record { a = 5 : nat; b = 5 : nat })")
         .assert()
         .success()
@@ -1165,8 +1062,7 @@ fn cmp_eq_true() {
 
 #[test]
 fn cmp_ne() {
-    cq()
-        .args([".a != .b"])
+    cq().args([".a != .b"])
         .write_stdin("(record { a = 10 : nat; b = 3 : nat })")
         .assert()
         .success()
@@ -1175,8 +1071,7 @@ fn cmp_ne() {
 
 #[test]
 fn cmp_lt() {
-    cq()
-        .args([". < 5"])
+    cq().args([". < 5"])
         .write_stdin("(3 : nat)")
         .assert()
         .success()
@@ -1185,8 +1080,7 @@ fn cmp_lt() {
 
 #[test]
 fn cmp_gt() {
-    cq()
-        .args([". > 5"])
+    cq().args([". > 5"])
         .write_stdin("(10 : nat)")
         .assert()
         .success()
@@ -1195,8 +1089,7 @@ fn cmp_gt() {
 
 #[test]
 fn cmp_le_equal() {
-    cq()
-        .args([". <= 5"])
+    cq().args([". <= 5"])
         .write_stdin("(5 : nat)")
         .assert()
         .success()
@@ -1205,8 +1098,7 @@ fn cmp_le_equal() {
 
 #[test]
 fn cmp_ge_greater() {
-    cq()
-        .args([". >= 3"])
+    cq().args([". >= 3"])
         .write_stdin("(5 : nat)")
         .assert()
         .success()
@@ -1216,8 +1108,7 @@ fn cmp_ge_greater() {
 #[test]
 fn cmp_signed_unsigned_mixed() {
     // signed int(-5) < unsigned nat(3)
-    cq()
-        .args([".a < .b"])
+    cq().args([".a < .b"])
         .write_stdin("(record { a = -5 : int; b = 3 : nat })")
         .assert()
         .success()
@@ -1226,8 +1117,7 @@ fn cmp_signed_unsigned_mixed() {
 
 #[test]
 fn select_passes_matching_value() {
-    cq()
-        .args(["select(. > 3)"])
+    cq().args(["select(. > 3)"])
         .write_stdin("(5 : nat)")
         .assert()
         .success()
@@ -1236,8 +1126,7 @@ fn select_passes_matching_value() {
 
 #[test]
 fn select_filters_non_matching_value() {
-    cq()
-        .args(["select(. > 3)"])
+    cq().args(["select(. > 3)"])
         .write_stdin("(2 : nat)")
         .assert()
         .success()
@@ -1260,8 +1149,7 @@ fn select_on_stream_filters_partial() {
 
 #[test]
 fn bool_not_true() {
-    cq()
-        .args(["not ."])
+    cq().args(["not ."])
         .write_stdin("(true)")
         .assert()
         .success()
@@ -1270,8 +1158,7 @@ fn bool_not_true() {
 
 #[test]
 fn bool_not_false() {
-    cq()
-        .args(["not ."])
+    cq().args(["not ."])
         .write_stdin("(false)")
         .assert()
         .success()
@@ -1280,8 +1167,7 @@ fn bool_not_false() {
 
 #[test]
 fn bool_and_both_true() {
-    cq()
-        .args(["true and true"])
+    cq().args(["true and true"])
         .write_stdin("(null)")
         .assert()
         .success()
@@ -1290,8 +1176,7 @@ fn bool_and_both_true() {
 
 #[test]
 fn bool_and_one_false() {
-    cq()
-        .args(["true and false"])
+    cq().args(["true and false"])
         .write_stdin("(null)")
         .assert()
         .success()
@@ -1300,8 +1185,7 @@ fn bool_and_one_false() {
 
 #[test]
 fn bool_or_one_true() {
-    cq()
-        .args(["false or true"])
+    cq().args(["false or true"])
         .write_stdin("(null)")
         .assert()
         .success()
@@ -1310,8 +1194,7 @@ fn bool_or_one_true() {
 
 #[test]
 fn bool_or_both_false() {
-    cq()
-        .args(["false or false"])
+    cq().args(["false or false"])
         .write_stdin("(null)")
         .assert()
         .success()
@@ -1321,8 +1204,7 @@ fn bool_or_both_false() {
 #[test]
 fn bool_compound_and_or() {
     // (. > 3) and (. < 10)
-    cq()
-        .args([". > 3 and . < 10"])
+    cq().args([". > 3 and . < 10"])
         .write_stdin("(5 : nat)")
         .assert()
         .success()
@@ -1331,8 +1213,7 @@ fn bool_compound_and_or() {
 
 #[test]
 fn select_with_compound_predicate() {
-    cq()
-        .args(["select(. > 3 and . < 10)"])
+    cq().args(["select(. > 3 and . < 10)"])
         .write_stdin("(5 : nat)")
         .assert()
         .success()
@@ -1343,8 +1224,7 @@ fn select_with_compound_predicate() {
 
 #[test]
 fn match_dispatches_to_correct_arm() {
-    cq()
-        .args(["match { Transfer = . ; Receive = 0 }"])
+    cq().args(["match { Transfer = . ; Receive = 0 }"])
         .write_stdin("(variant { Transfer = \"hello\" })")
         .assert()
         .success()
@@ -1353,8 +1233,7 @@ fn match_dispatches_to_correct_arm() {
 
 #[test]
 fn match_payload_bound_as_dot() {
-    cq()
-        .args(["match { Ok = . ; Err = \"error\" }"])
+    cq().args(["match { Ok = . ; Err = \"error\" }"])
         .write_stdin("(variant { Ok = 42 : nat })")
         .assert()
         .success()
@@ -1363,8 +1242,7 @@ fn match_payload_bound_as_dot() {
 
 #[test]
 fn match_default_arm_catches_unmatched() {
-    cq()
-        .args(["match { Transfer = \"transfer\" ; _ = \"other\" }"])
+    cq().args(["match { Transfer = \"transfer\" ; _ = \"other\" }"])
         .write_stdin("(variant { Mint = null })")
         .assert()
         .success()
@@ -1373,8 +1251,7 @@ fn match_default_arm_catches_unmatched() {
 
 #[test]
 fn match_no_arm_no_default_errors() {
-    cq()
-        .args(["match { Transfer = . }"])
+    cq().args(["match { Transfer = . }"])
         .write_stdin("(variant { Receive = null })")
         .assert()
         .failure()
@@ -1383,8 +1260,7 @@ fn match_no_arm_no_default_errors() {
 
 #[test]
 fn match_null_payload_arm() {
-    cq()
-        .args(["match { Pending = \"pending\" ; _ = \"other\" }"])
+    cq().args(["match { Pending = \"pending\" ; _ = \"other\" }"])
         .write_stdin("(variant { Pending })")
         .assert()
         .success()
@@ -1393,8 +1269,7 @@ fn match_null_payload_arm() {
 
 #[test]
 fn match_non_variant_errors() {
-    cq()
-        .args(["match { A = . }"])
+    cq().args(["match { A = . }"])
         .write_stdin("(42 : nat)")
         .assert()
         .failure()
@@ -1403,8 +1278,7 @@ fn match_non_variant_errors() {
 
 #[test]
 fn tag_returns_active_tag_as_text() {
-    cq()
-        .args(["tag(.)"])
+    cq().args(["tag(.)"])
         .write_stdin("(variant { Transfer = 100 : nat })")
         .assert()
         .success()
@@ -1413,8 +1287,7 @@ fn tag_returns_active_tag_as_text() {
 
 #[test]
 fn tag_on_non_variant_errors() {
-    cq()
-        .args(["tag(.)"])
+    cq().args(["tag(.)"])
         .write_stdin("(42 : nat)")
         .assert()
         .failure()
@@ -1423,8 +1296,7 @@ fn tag_on_non_variant_errors() {
 
 #[test]
 fn tag_on_nested_variant_field() {
-    cq()
-        .args(["tag(.status)"])
+    cq().args(["tag(.status)"])
         .write_stdin("(record { status = variant { Active = null } })")
         .assert()
         .success()
@@ -1433,8 +1305,7 @@ fn tag_on_nested_variant_field() {
 
 #[test]
 fn tag_select_filter_stream() {
-    cq()
-        .args(["select(tag(.kind) == \"Transfer\")"])
+    cq().args(["select(tag(.kind) == \"Transfer\")"])
         .write_stdin(
             "(record { kind = variant { Transfer = 100 : nat } })\
              (record { kind = variant { Receive = 50 : nat } })\
@@ -1450,8 +1321,7 @@ fn tag_select_filter_stream() {
 
 #[test]
 fn match_body_expression_uses_payload() {
-    cq()
-        .args(["match { Transfer = . * 2 ; _ = 0 }"])
+    cq().args(["match { Transfer = . * 2 ; _ = 0 }"])
         .write_stdin("(variant { Transfer = 10 : nat })")
         .assert()
         .success()
@@ -1462,8 +1332,7 @@ fn match_body_expression_uses_payload() {
 
 #[test]
 fn if_true_branch() {
-    cq()
-        .args(["if .x then \"yes\" else \"no\" end"])
+    cq().args(["if .x then \"yes\" else \"no\" end"])
         .write_stdin("(record { x = true })")
         .assert()
         .success()
@@ -1472,8 +1341,7 @@ fn if_true_branch() {
 
 #[test]
 fn if_false_branch() {
-    cq()
-        .args(["if .x then \"yes\" else \"no\" end"])
+    cq().args(["if .x then \"yes\" else \"no\" end"])
         .write_stdin("(record { x = false })")
         .assert()
         .success()
@@ -1482,8 +1350,7 @@ fn if_false_branch() {
 
 #[test]
 fn if_elif_else() {
-    cq()
-        .args(["if .x == 1 then \"one\" elif .x == 2 then \"two\" else \"other\" end"])
+    cq().args(["if .x == 1 then \"one\" elif .x == 2 then \"two\" else \"other\" end"])
         .write_stdin("(record { x = 2 : nat })")
         .assert()
         .success()
@@ -1492,8 +1359,7 @@ fn if_elif_else() {
 
 #[test]
 fn if_elif_else_default() {
-    cq()
-        .args(["if .x == 1 then \"one\" elif .x == 2 then \"two\" else \"other\" end"])
+    cq().args(["if .x == 1 then \"one\" elif .x == 2 then \"two\" else \"other\" end"])
         .write_stdin("(record { x = 99 : nat })")
         .assert()
         .success()
@@ -1502,8 +1368,7 @@ fn if_elif_else_default() {
 
 #[test]
 fn if_condition_not_bool_errors() {
-    cq()
-        .args(["if . then \"yes\" else \"no\" end"])
+    cq().args(["if . then \"yes\" else \"no\" end"])
         .write_stdin("(42 : nat)")
         .assert()
         .failure()
@@ -1512,8 +1377,7 @@ fn if_condition_not_bool_errors() {
 
 #[test]
 fn if_without_else_no_match_returns_empty() {
-    cq()
-        .args(["if .x then \"yes\" end"])
+    cq().args(["if .x then \"yes\" end"])
         .write_stdin("(record { x = false })")
         .assert()
         .success()
@@ -1522,8 +1386,7 @@ fn if_without_else_no_match_returns_empty() {
 
 #[test]
 fn var_bind_basic() {
-    cq()
-        .args([".foo as $x | {result: $x}"])
+    cq().args([".foo as $x | {result: $x}"])
         .write_stdin("(record { foo = 42 : nat })")
         .assert()
         .success()
@@ -1532,8 +1395,7 @@ fn var_bind_basic() {
 
 #[test]
 fn var_bind_multiple() {
-    cq()
-        .args([".a as $a | .b as $b | $a + $b"])
+    cq().args([".a as $a | .b as $b | $a + $b"])
         .write_stdin("(record { a = 10 : nat; b = 20 : nat })")
         .assert()
         .success()
@@ -1542,8 +1404,7 @@ fn var_bind_multiple() {
 
 #[test]
 fn var_bind_in_condition() {
-    cq()
-        .args([".val as $v | if $v == 1 then \"one\" else \"other\" end"])
+    cq().args([".val as $v | if $v == 1 then \"one\" else \"other\" end"])
         .write_stdin("(record { val = 1 : nat })")
         .assert()
         .success()
@@ -1552,8 +1413,7 @@ fn var_bind_in_condition() {
 
 #[test]
 fn var_ref_undefined_errors() {
-    cq()
-        .args(["$undefined"])
+    cq().args(["$undefined"])
         .write_stdin("(42 : nat)")
         .assert()
         .failure()
@@ -1562,8 +1422,7 @@ fn var_ref_undefined_errors() {
 
 #[test]
 fn string_interp_text_field() {
-    cq()
-        .args(["\"hello \\(.name)\""])
+    cq().args(["\"hello \\(.name)\""])
         .write_stdin("(record { name = \"world\" })")
         .assert()
         .success()
@@ -1572,8 +1431,7 @@ fn string_interp_text_field() {
 
 #[test]
 fn string_interp_nat_field() {
-    cq()
-        .args(["\"count: \\(.n)\""])
+    cq().args(["\"count: \\(.n)\""])
         .write_stdin("(record { n = 42 : nat })")
         .assert()
         .success()
@@ -1582,8 +1440,7 @@ fn string_interp_nat_field() {
 
 #[test]
 fn string_interp_prefix_and_suffix() {
-    cq()
-        .args(["\"[\\(.x)]\""])
+    cq().args(["\"[\\(.x)]\""])
         .write_stdin("(record { x = 7 : nat })")
         .assert()
         .success()
@@ -1592,8 +1449,7 @@ fn string_interp_prefix_and_suffix() {
 
 #[test]
 fn string_interp_nested() {
-    cq()
-        .args(["\"outer \\(\"inner \\(.v)\")\""])
+    cq().args(["\"outer \\(\"inner \\(.v)\")\""])
         .write_stdin("(record { v = 1 : nat })")
         .assert()
         .success()
@@ -1602,8 +1458,7 @@ fn string_interp_nested() {
 
 #[test]
 fn string_interp_var() {
-    cq()
-        .args([".x as $v | \"val=\\($v)\""])
+    cq().args([".x as $v | \"val=\\($v)\""])
         .write_stdin("(record { x = 5 : nat })")
         .assert()
         .success()
@@ -1614,8 +1469,7 @@ fn string_interp_var() {
 
 #[test]
 fn length_vec() {
-    cq()
-        .args(["length"])
+    cq().args(["length"])
         .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
         .assert()
         .success()
@@ -1624,8 +1478,7 @@ fn length_vec() {
 
 #[test]
 fn length_text() {
-    cq()
-        .args(["length"])
+    cq().args(["length"])
         .write_stdin("(\"hello\")")
         .assert()
         .success()
@@ -1634,8 +1487,7 @@ fn length_text() {
 
 #[test]
 fn length_blob() {
-    cq()
-        .args(["length"])
+    cq().args(["length"])
         .write_stdin("(blob \"\\00\\01\\02\")")
         .assert()
         .success()
@@ -1644,8 +1496,7 @@ fn length_blob() {
 
 #[test]
 fn keys_record_sorted() {
-    cq()
-        .args(["keys"])
+    cq().args(["keys"])
         .write_stdin("(record { b = 2 : nat; a = 1 : nat })")
         .assert()
         .success()
@@ -1654,8 +1505,7 @@ fn keys_record_sorted() {
 
 #[test]
 fn values_record_sorted_by_key() {
-    cq()
-        .args(["values"])
+    cq().args(["values"])
         .write_stdin("(record { b = 2 : nat; a = 1 : nat })")
         .assert()
         .success()
@@ -1664,8 +1514,7 @@ fn values_record_sorted_by_key() {
 
 #[test]
 fn type_nat() {
-    cq()
-        .args(["type"])
+    cq().args(["type"])
         .write_stdin("(42 : nat)")
         .assert()
         .success()
@@ -1674,8 +1523,7 @@ fn type_nat() {
 
 #[test]
 fn type_record() {
-    cq()
-        .args(["type"])
+    cq().args(["type"])
         .write_stdin("(record { x = 1 : nat })")
         .assert()
         .success()
@@ -1684,8 +1532,7 @@ fn type_record() {
 
 #[test]
 fn type_variant() {
-    cq()
-        .args(["type"])
+    cq().args(["type"])
         .write_stdin("(variant { Ok = \"hi\" })")
         .assert()
         .success()
@@ -1694,8 +1541,7 @@ fn type_variant() {
 
 #[test]
 fn type_vec() {
-    cq()
-        .args(["type"])
+    cq().args(["type"])
         .write_stdin("(vec { 1 : nat })")
         .assert()
         .success()
@@ -1704,8 +1550,7 @@ fn type_vec() {
 
 #[test]
 fn has_field_present() {
-    cq()
-        .args(["has(\"x\")"])
+    cq().args(["has(\"x\")"])
         .write_stdin("(record { x = 1 : nat })")
         .assert()
         .success()
@@ -1714,8 +1559,7 @@ fn has_field_present() {
 
 #[test]
 fn has_field_absent() {
-    cq()
-        .args(["has(\"y\")"])
+    cq().args(["has(\"y\")"])
         .write_stdin("(record { x = 1 : nat })")
         .assert()
         .success()
@@ -1724,8 +1568,7 @@ fn has_field_absent() {
 
 #[test]
 fn contains_text_found() {
-    cq()
-        .args(["contains(\"world\")"])
+    cq().args(["contains(\"world\")"])
         .write_stdin("(\"hello world\")")
         .assert()
         .success()
@@ -1734,8 +1577,7 @@ fn contains_text_found() {
 
 #[test]
 fn contains_text_not_found() {
-    cq()
-        .args(["contains(\"xyz\")"])
+    cq().args(["contains(\"xyz\")"])
         .write_stdin("(\"hello world\")")
         .assert()
         .success()
@@ -1744,8 +1586,7 @@ fn contains_text_not_found() {
 
 #[test]
 fn contains_vec_found() {
-    cq()
-        .args(["contains(2 : nat)"])
+    cq().args(["contains(2 : nat)"])
         .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
         .assert()
         .success()
@@ -1754,8 +1595,7 @@ fn contains_vec_found() {
 
 #[test]
 fn contains_vec_not_found() {
-    cq()
-        .args(["contains(99 : nat)"])
+    cq().args(["contains(99 : nat)"])
         .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
         .assert()
         .success()
@@ -1764,8 +1604,7 @@ fn contains_vec_not_found() {
 
 #[test]
 fn map_add_one() {
-    cq()
-        .args(["map(. + 1)"])
+    cq().args(["map(. + 1)"])
         .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
         .assert()
         .success()
@@ -1774,8 +1613,7 @@ fn map_add_one() {
 
 #[test]
 fn map_empty_vec() {
-    cq()
-        .args(["map(. + 1)"])
+    cq().args(["map(. + 1)"])
         .write_stdin("(vec {})")
         .assert()
         .success()
@@ -1784,8 +1622,7 @@ fn map_empty_vec() {
 
 #[test]
 fn to_text_nat() {
-    cq()
-        .args(["to_text"])
+    cq().args(["to_text"])
         .write_stdin("(42 : nat)")
         .assert()
         .success()
@@ -1794,8 +1631,7 @@ fn to_text_nat() {
 
 #[test]
 fn to_text_bool() {
-    cq()
-        .args(["to_text"])
+    cq().args(["to_text"])
         .write_stdin("(true)")
         .assert()
         .success()
@@ -1804,8 +1640,7 @@ fn to_text_bool() {
 
 #[test]
 fn to_int_from_nat() {
-    cq()
-        .args(["to_int"])
+    cq().args(["to_int"])
         .write_stdin("(42 : nat)")
         .assert()
         .success()
@@ -1814,8 +1649,7 @@ fn to_int_from_nat() {
 
 #[test]
 fn to_int_from_text() {
-    cq()
-        .args(["to_int"])
+    cq().args(["to_int"])
         .write_stdin("(\"-7\")")
         .assert()
         .success()
@@ -1824,8 +1658,7 @@ fn to_int_from_text() {
 
 #[test]
 fn to_float_from_nat() {
-    cq()
-        .args(["to_float"])
+    cq().args(["to_float"])
         .write_stdin("(3 : nat)")
         .assert()
         .success()
@@ -1834,8 +1667,7 @@ fn to_float_from_nat() {
 
 #[test]
 fn to_principal_from_text() {
-    cq()
-        .args(["to_principal"])
+    cq().args(["to_principal"])
         .write_stdin("(\"aaaaa-aa\")")
         .assert()
         .success()
@@ -1844,8 +1676,7 @@ fn to_principal_from_text() {
 
 #[test]
 fn to_hex_blob() {
-    cq()
-        .args(["to_hex"])
+    cq().args(["to_hex"])
         .write_stdin("(blob \"\\00\\ff\")")
         .assert()
         .success()
@@ -1854,8 +1685,7 @@ fn to_hex_blob() {
 
 #[test]
 fn from_hex_text() {
-    cq()
-        .args(["from_hex"])
+    cq().args(["from_hex"])
         .write_stdin("(\"00ff\")")
         .assert()
         .success()
@@ -1864,8 +1694,7 @@ fn from_hex_text() {
 
 #[test]
 fn to_utf8_text() {
-    cq()
-        .args(["to_utf8"])
+    cq().args(["to_utf8"])
         .write_stdin("(\"hi\")")
         .assert()
         .success()
@@ -1874,8 +1703,7 @@ fn to_utf8_text() {
 
 #[test]
 fn from_utf8_blob() {
-    cq()
-        .args(["from_utf8"])
+    cq().args(["from_utf8"])
         .write_stdin("(blob \"hi\")")
         .assert()
         .success()
@@ -1884,8 +1712,7 @@ fn from_utf8_blob() {
 
 #[test]
 fn is_some_on_opt_some() {
-    cq()
-        .args(["is_some"])
+    cq().args(["is_some"])
         .write_stdin("(opt (42 : nat))")
         .assert()
         .success()
@@ -1894,8 +1721,7 @@ fn is_some_on_opt_some() {
 
 #[test]
 fn is_some_on_opt_none() {
-    cq()
-        .args(["is_some"])
+    cq().args(["is_some"])
         .write_stdin("(null : opt nat)")
         .assert()
         .success()
@@ -1904,8 +1730,7 @@ fn is_some_on_opt_none() {
 
 #[test]
 fn is_none_on_opt_none() {
-    cq()
-        .args(["is_none"])
+    cq().args(["is_none"])
         .write_stdin("(null : opt nat)")
         .assert()
         .success()
@@ -1914,8 +1739,7 @@ fn is_none_on_opt_none() {
 
 #[test]
 fn is_none_on_opt_some() {
-    cq()
-        .args(["is_none"])
+    cq().args(["is_none"])
         .write_stdin("(opt (42 : nat))")
         .assert()
         .success()
@@ -1924,8 +1748,7 @@ fn is_none_on_opt_some() {
 
 #[test]
 fn principal_equality() {
-    cq()
-        .args([". == principal \"aaaaa-aa\""])
+    cq().args([". == principal \"aaaaa-aa\""])
         .write_stdin("(principal \"aaaaa-aa\")")
         .assert()
         .success()
@@ -1934,8 +1757,7 @@ fn principal_equality() {
 
 #[test]
 fn principal_inequality() {
-    cq()
-        .args([". != principal \"aaaaa-aa\""])
+    cq().args([". != principal \"aaaaa-aa\""])
         .write_stdin("(principal \"2vxsx-fae\")")
         .assert()
         .success()
@@ -1946,8 +1768,7 @@ fn principal_inequality() {
 
 #[test]
 fn sort_nat_vec() {
-    cq()
-        .args(["sort"])
+    cq().args(["sort"])
         .write_stdin("(vec { 3 : nat; 1 : nat; 2 : nat })")
         .assert()
         .success()
@@ -1956,8 +1777,7 @@ fn sort_nat_vec() {
 
 #[test]
 fn sort_text_vec() {
-    cq()
-        .args(["sort"])
+    cq().args(["sort"])
         .write_stdin("(vec { \"banana\"; \"apple\"; \"cherry\" })")
         .assert()
         .success()
@@ -1966,8 +1786,7 @@ fn sort_text_vec() {
 
 #[test]
 fn sort_empty_vec() {
-    cq()
-        .args(["sort"])
+    cq().args(["sort"])
         .write_stdin("(vec {})")
         .assert()
         .success()
@@ -1976,8 +1795,7 @@ fn sort_empty_vec() {
 
 #[test]
 fn sort_already_sorted() {
-    cq()
-        .args(["sort"])
+    cq().args(["sort"])
         .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
         .assert()
         .success()
@@ -1986,8 +1804,7 @@ fn sort_already_sorted() {
 
 #[test]
 fn sort_mixed_types_errors() {
-    cq()
-        .args(["sort"])
+    cq().args(["sort"])
         .write_stdin("(vec { 1 : nat; \"text\" })")
         .assert()
         .failure()
@@ -2024,8 +1841,7 @@ fn sort_by_text_field() {
 
 #[test]
 fn sort_by_empty_vec() {
-    cq()
-        .args(["sort_by(.x)"])
+    cq().args(["sort_by(.x)"])
         .write_stdin("(vec {})")
         .assert()
         .success()
@@ -2062,8 +1878,7 @@ fn group_by_field() {
 
 #[test]
 fn group_by_empty_vec() {
-    cq()
-        .args(["group_by(.x)"])
+    cq().args(["group_by(.x)"])
         .write_stdin("(vec {})")
         .assert()
         .success()
@@ -2072,8 +1887,7 @@ fn group_by_empty_vec() {
 
 #[test]
 fn unique_deduplicates() {
-    cq()
-        .args(["unique"])
+    cq().args(["unique"])
         .write_stdin("(vec { 1 : nat; 2 : nat; 1 : nat; 3 : nat; 2 : nat })")
         .assert()
         .success()
@@ -2082,8 +1896,7 @@ fn unique_deduplicates() {
 
 #[test]
 fn unique_preserves_first_occurrence_order() {
-    cq()
-        .args(["unique"])
+    cq().args(["unique"])
         .write_stdin("(vec { \"c\"; \"a\"; \"b\"; \"a\"; \"c\" })")
         .assert()
         .success()
@@ -2092,8 +1905,7 @@ fn unique_preserves_first_occurrence_order() {
 
 #[test]
 fn unique_empty_vec() {
-    cq()
-        .args(["unique"])
+    cq().args(["unique"])
         .write_stdin("(vec {})")
         .assert()
         .success()
@@ -2102,8 +1914,7 @@ fn unique_empty_vec() {
 
 #[test]
 fn unique_no_duplicates() {
-    cq()
-        .args(["unique"])
+    cq().args(["unique"])
         .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
         .assert()
         .success()
@@ -2115,8 +1926,7 @@ fn unique_no_duplicates() {
 #[test]
 fn did_without_schema_shows_hash() {
     // Binary-decoded record without --did renders field as numeric hash
-    cq()
-        .args(["--input-format", "hex"])
+    cq().args(["--input-format", "hex"])
         .write_stdin("4449444c016c01868eb7027d01002a")
         .assert()
         .success()
@@ -2126,19 +1936,22 @@ fn did_without_schema_shows_hash() {
 #[test]
 fn did_with_schema_resolves_record_field() {
     // Binary-decoded record with --did renders original field name
-    cq()
-        .args(["--input-format", "hex", "--did", "tests/fixtures/schema1.did"])
-        .write_stdin("4449444c016c01868eb7027d01002a")
-        .assert()
-        .success()
-        .stdout("(record { foo = 42 : nat })\n");
+    cq().args([
+        "--input-format",
+        "hex",
+        "--did",
+        "tests/fixtures/schema1.did",
+    ])
+    .write_stdin("4449444c016c01868eb7027d01002a")
+    .assert()
+    .success()
+    .stdout("(record { foo = 42 : nat })\n");
 }
 
 #[test]
 fn did_without_schema_shows_variant_hash() {
     // Binary-decoded variant without --did renders tag as numeric hash
-    cq()
-        .args(["--input-format", "hex"])
+    cq().args(["--input-format", "hex"])
         .write_stdin("4449444c016b01bc8a017d0100002a")
         .assert()
         .success()
@@ -2148,36 +1961,38 @@ fn did_without_schema_shows_variant_hash() {
 #[test]
 fn did_with_schema_resolves_variant_tag() {
     // Binary-decoded variant with --did renders original tag name
-    cq()
-        .args(["--input-format", "hex", "--did", "tests/fixtures/schema1.did"])
-        .write_stdin("4449444c016b01bc8a017d0100002a")
-        .assert()
-        .success()
-        .stdout("(variant { Ok = 42 : nat })\n");
+    cq().args([
+        "--input-format",
+        "hex",
+        "--did",
+        "tests/fixtures/schema1.did",
+    ])
+    .write_stdin("4449444c016b01bc8a017d0100002a")
+    .assert()
+    .success()
+    .stdout("(variant { Ok = 42 : nat })\n");
 }
 
 #[test]
 fn did_multiple_flags_union_schemas() {
     // --did can be specified multiple times; names from both files are resolved
-    cq()
-        .args([
-            "--input-format",
-            "hex",
-            "--did",
-            "tests/fixtures/schema1.did",
-            "--did",
-            "tests/fixtures/schema2.did",
-        ])
-        .write_stdin("4449444c016c01dbe3aa027e010001")
-        .assert()
-        .success()
-        .stdout("(record { baz = true })\n");
+    cq().args([
+        "--input-format",
+        "hex",
+        "--did",
+        "tests/fixtures/schema1.did",
+        "--did",
+        "tests/fixtures/schema2.did",
+    ])
+    .write_stdin("4449444c016c01dbe3aa027e010001")
+    .assert()
+    .success()
+    .stdout("(record { baz = true })\n");
 }
 
 #[test]
 fn did_file_not_found_error() {
-    cq()
-        .args(["--did", "nonexistent.did"])
+    cq().args(["--did", "nonexistent.did"])
         .write_stdin("(42 : nat)")
         .assert()
         .failure()
@@ -2186,8 +2001,7 @@ fn did_file_not_found_error() {
 
 #[test]
 fn did_file_malformed_error() {
-    cq()
-        .args(["--did", "tests/fixtures/bad.did"])
+    cq().args(["--did", "tests/fixtures/bad.did"])
         .write_stdin("(42 : nat)")
         .assert()
         .failure()
@@ -2200,8 +2014,7 @@ fn did_file_malformed_error() {
 fn hash_auto_resolve_named_field_no_did() {
     // .foo on a hash-keyed binary record (no --did) works via idl_hash auto-resolution
     // idl_hash("foo") = 5_097_222 (the hash in the binary record)
-    cq()
-        .args(["--input-format", "hex", ".foo"])
+    cq().args(["--input-format", "hex", ".foo"])
         .write_stdin("4449444c016c01868eb7027d01002a")
         .assert()
         .success()
@@ -2211,8 +2024,7 @@ fn hash_auto_resolve_named_field_no_did() {
 #[test]
 fn hash_numeric_access_on_hash_keyed_record() {
     // .[5097222] accesses by raw hash on a binary-decoded record
-    cq()
-        .args(["--input-format", "hex", ".[5097222]"])
+    cq().args(["--input-format", "hex", ".[5097222]"])
         .write_stdin("4449444c016c01868eb7027d01002a")
         .assert()
         .success()
@@ -2223,8 +2035,7 @@ fn hash_numeric_access_on_hash_keyed_record() {
 fn hash_numeric_access_on_named_field_record() {
     // .[n] also works when the field has a Named label (text input)
     // idl_hash("foo") = 5097222
-    cq()
-        .args([".[5097222]"])
+    cq().args([".[5097222]"])
         .write_stdin("(record { foo = 42 : nat })")
         .assert()
         .success()
@@ -2234,25 +2045,23 @@ fn hash_numeric_access_on_named_field_record() {
 #[test]
 fn hash_numeric_access_with_did() {
     // .[n] still works when --did is provided (schema doesn't affect in-memory IDLValue labels)
-    cq()
-        .args([
-            "--input-format",
-            "hex",
-            "--did",
-            "tests/fixtures/schema1.did",
-            ".[5097222]",
-        ])
-        .write_stdin("4449444c016c01868eb7027d01002a")
-        .assert()
-        .success()
-        .stdout("(42 : nat)\n");
+    cq().args([
+        "--input-format",
+        "hex",
+        "--did",
+        "tests/fixtures/schema1.did",
+        ".[5097222]",
+    ])
+    .write_stdin("4449444c016c01868eb7027d01002a")
+    .assert()
+    .success()
+    .stdout("(42 : nat)\n");
 }
 
 #[test]
 fn hash_numeric_access_not_found_error() {
     // .[n] with a hash not present in the record gives a clear error
-    cq()
-        .args([".[9999999]"])
+    cq().args([".[9999999]"])
         .write_stdin("(record { foo = 42 : nat })")
         .assert()
         .failure()
@@ -2262,8 +2071,7 @@ fn hash_numeric_access_not_found_error() {
 #[test]
 fn hash_named_field_wrong_name_fails() {
     // Querying .old_name after a field was renamed fails loudly (schema drift caught)
-    cq()
-        .args(["--input-format", "hex", ".renamed_field"])
+    cq().args(["--input-format", "hex", ".renamed_field"])
         .write_stdin("4449444c016c01868eb7027d01002a")
         .assert()
         .failure()
@@ -2274,8 +2082,7 @@ fn hash_named_field_wrong_name_fails() {
 fn hash_named_and_numeric_equivalent() {
     // .bar and .[idl_hash("bar")] produce the same result on a text-encoded record
     // idl_hash("bar") can be computed; we verify via chained queries that they're consistent
-    cq()
-        .args([".foo"])
+    cq().args([".foo"])
         .write_stdin("(record { foo = 99 : nat; bar = 1 : nat })")
         .assert()
         .success()
@@ -2287,8 +2094,7 @@ fn hash_named_and_numeric_equivalent() {
 #[test]
 fn did_you_mean_close_field_name() {
     // "fo" is close to "foo" → did-you-mean suggestion
-    cq()
-        .args([".fo"])
+    cq().args([".fo"])
         .write_stdin("(record { foo = 1 : nat })")
         .assert()
         .failure()
@@ -2298,8 +2104,7 @@ fn did_you_mean_close_field_name() {
 #[test]
 fn did_you_mean_no_suggestion_far_field() {
     // "xyz" is not close to any of foo/bar → no suggestion, but lists fields
-    cq()
-        .args([".xyz"])
+    cq().args([".xyz"])
         .write_stdin("(record { foo = 1 : nat; bar = 2 : nat })")
         .assert()
         .failure()
@@ -2311,8 +2116,7 @@ fn did_you_mean_no_suggestion_far_field() {
 #[test]
 fn unknown_field_lists_sorted_fields() {
     // Available fields are listed in sorted order
-    cq()
-        .args([".missing"])
+    cq().args([".missing"])
         .write_stdin("(record { zebra = 1 : nat; apple = 2 : nat; mango = 3 : nat })")
         .assert()
         .failure()
@@ -2322,8 +2126,7 @@ fn unknown_field_lists_sorted_fields() {
 #[test]
 fn match_no_arm_lists_arms() {
     // When no match arm fires, list all defined arms
-    cq()
-        .args(["match { Send = 1; Receive = 2 }"])
+    cq().args(["match { Send = 1; Receive = 2 }"])
         .write_stdin("(variant { Transfer = 42 : nat })")
         .assert()
         .failure()
@@ -2335,8 +2138,7 @@ fn match_no_arm_lists_arms() {
 #[test]
 fn match_no_arm_did_you_mean() {
     // Typo in arm name → did-you-mean suggestion (no default arm so it errors)
-    cq()
-        .args(["match { Transfr = 1 }"])
+    cq().args(["match { Transfr = 1 }"])
         .write_stdin("(variant { Transfer = 42 : nat })")
         .assert()
         .failure()
@@ -2347,8 +2149,7 @@ fn match_no_arm_did_you_mean() {
 #[test]
 fn arith_type_error_names_operator() {
     // '+' on non-numeric gives the operator name in the error
-    cq()
-        .args([r#". + 1"#])
+    cq().args([r#". + 1"#])
         .write_stdin(r#"("hello")"#)
         .assert()
         .failure()
@@ -2359,8 +2160,7 @@ fn arith_type_error_names_operator() {
 #[test]
 fn cmp_type_error_names_operator() {
     // '==' on non-numeric non-text gives the operator name in the error
-    cq()
-        .args([". == true"])
+    cq().args([". == true"])
         .write_stdin("(42 : nat)")
         .assert()
         .failure()
@@ -2371,8 +2171,7 @@ fn cmp_type_error_names_operator() {
 #[test]
 fn cmp_mixed_types_error() {
     // Comparing text vs nat gives a type-mismatch error naming both types
-    cq()
-        .args([r#". == 1"#])
+    cq().args([r#". == 1"#])
         .write_stdin(r#"("hello")"#)
         .assert()
         .failure()
@@ -2384,8 +2183,7 @@ fn cmp_mixed_types_error() {
 
 #[test]
 fn compact_flag_single_line_record() {
-    cq()
-        .args(["-c"])
+    cq().args(["-c"])
         .write_stdin("(record { foo = 1 : nat })")
         .assert()
         .success()
@@ -2394,8 +2192,7 @@ fn compact_flag_single_line_record() {
 
 #[test]
 fn compact_flag_single_line_vec() {
-    cq()
-        .args(["-c"])
+    cq().args(["-c"])
         .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
         .assert()
         .success()
@@ -2404,8 +2201,7 @@ fn compact_flag_single_line_vec() {
 
 #[test]
 fn compact_long_form() {
-    cq()
-        .args(["--compact"])
+    cq().args(["--compact"])
         .write_stdin("(record { foo = 1 : nat })")
         .assert()
         .success()
@@ -2425,8 +2221,7 @@ fn compact_round_trips_with_pretty() {
         .stdout
         .clone();
 
-    cq()
-        .write_stdin(compact_out)
+    cq().write_stdin(compact_out)
         .assert()
         .success()
         .stdout("(record { bar = \"hello\"; foo = 1 : nat })\n");
@@ -2488,7 +2283,11 @@ fn color_always_overrides_no_color_env() {
         .stdout
         .clone();
     let s = String::from_utf8(out).unwrap();
-    assert!(s.contains('\x1b'), "expected ANSI codes even with NO_COLOR, got: {:?}", s);
+    assert!(
+        s.contains('\x1b'),
+        "expected ANSI codes even with NO_COLOR, got: {:?}",
+        s
+    );
 }
 
 #[test]
@@ -2503,8 +2302,16 @@ fn blob_threshold_short_uses_blob_literal() {
         .stdout
         .clone();
     let s = String::from_utf8(out).unwrap();
-    assert!(s.starts_with("(blob \""), "expected blob literal, got: {:?}", s);
-    assert!(!s.contains("blob_hex"), "expected no blob_hex, got: {:?}", s);
+    assert!(
+        s.starts_with("(blob \""),
+        "expected blob literal, got: {:?}",
+        s
+    );
+    assert!(
+        !s.contains("blob_hex"),
+        "expected no blob_hex, got: {:?}",
+        s
+    );
 }
 
 #[test]
@@ -2520,9 +2327,17 @@ fn blob_threshold_long_uses_blob_hex() {
         .stdout
         .clone();
     let s = String::from_utf8(out).unwrap();
-    assert!(s.contains("blob_hex"), "expected blob_hex for long blob, got: {:?}", s);
+    assert!(
+        s.contains("blob_hex"),
+        "expected blob_hex for long blob, got: {:?}",
+        s
+    );
     // hex of "hello" = 68656c6c6f
-    assert!(s.contains("68656c6c6f"), "expected hex encoding of hello, got: {:?}", s);
+    assert!(
+        s.contains("68656c6c6f"),
+        "expected hex encoding of hello, got: {:?}",
+        s
+    );
 }
 
 #[test]
@@ -2536,7 +2351,11 @@ fn blob_threshold_zero_always_hex() {
         .stdout
         .clone();
     let s = String::from_utf8(out).unwrap();
-    assert!(s.contains("blob_hex"), "expected blob_hex with threshold=0, got: {:?}", s);
+    assert!(
+        s.contains("blob_hex"),
+        "expected blob_hex with threshold=0, got: {:?}",
+        s
+    );
 }
 
 // --- --exit-status / -e flag ---
@@ -2544,8 +2363,7 @@ fn blob_threshold_zero_always_hex() {
 #[test]
 fn exit_status_no_values_exits_1() {
     // .[] on empty vec produces zero values; -e should give exit 1
-    cq()
-        .args(["-e", ".[]"])
+    cq().args(["-e", ".[]"])
         .write_stdin("(vec {})")
         .assert()
         .failure()
@@ -2555,8 +2373,7 @@ fn exit_status_no_values_exits_1() {
 #[test]
 fn exit_status_with_values_exits_0() {
     // -e with at least one value should still exit 0
-    cq()
-        .args(["-e", "."])
+    cq().args(["-e", "."])
         .write_stdin("(42 : nat)")
         .assert()
         .success();
@@ -2564,8 +2381,7 @@ fn exit_status_with_values_exits_0() {
 
 #[test]
 fn exit_status_long_flag() {
-    cq()
-        .args(["--exit-status", ".[]"])
+    cq().args(["--exit-status", ".[]"])
         .write_stdin("(vec {})")
         .assert()
         .failure()
@@ -2575,8 +2391,7 @@ fn exit_status_long_flag() {
 #[test]
 fn without_exit_status_empty_is_0() {
     // Without -e, empty output is still exit 0
-    cq()
-        .args([".[]"])
+    cq().args([".[]"])
         .write_stdin("(vec {})")
         .assert()
         .success();
@@ -2585,8 +2400,7 @@ fn without_exit_status_empty_is_0() {
 #[test]
 fn exit_status_error_still_exits_1() {
     // Parse error should still exit 1 regardless of -e
-    cq()
-        .args(["-e", "."])
+    cq().args(["-e", "."])
         .write_stdin("not valid candid")
         .assert()
         .failure()

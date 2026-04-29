@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 struct Cursor<'a> {
     data: &'a [u8],
@@ -159,7 +159,11 @@ fn skip_value(c: &mut Cursor, type_ref: i64, table: &[Entry], depth: u32) -> Res
     if type_ref >= 0 {
         let idx = type_ref as usize;
         if idx >= table.len() {
-            bail!("type table index {} out of range (table len {})", idx, table.len());
+            bail!(
+                "type table index {} out of range (table len {})",
+                idx,
+                table.len()
+            );
         }
         // Clone to avoid borrow issues with recursive calls
         let entry = table[idx].clone();
@@ -167,7 +171,7 @@ fn skip_value(c: &mut Cursor, type_ref: i64, table: &[Entry], depth: u32) -> Res
     }
     // Primitive type codes (negative)
     match type_ref {
-        -1 => {}  // null: 0 bytes
+        -1 => {} // null: 0 bytes
         -2 => {
             c.skip_n(1)?; // bool: 1 byte
         }
@@ -237,7 +241,11 @@ fn skip_entry_value(c: &mut Cursor, entry: &Entry, table: &[Entry], depth: u32) 
         Entry::Variant(tags) => {
             let idx = c.read_uleb()? as usize;
             if idx >= tags.len() {
-                bail!("variant index {} out of range (num tags {})", idx, tags.len());
+                bail!(
+                    "variant index {} out of range (num tags {})",
+                    idx,
+                    tags.len()
+                );
             }
             skip_value(c, tags[idx].1, table, depth + 1)?;
         }

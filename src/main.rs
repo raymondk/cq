@@ -53,7 +53,13 @@ fn run() -> Result<()> {
         let args_val = value_result?;
         let results = query::evaluate(args_val, args.query.as_deref())?;
         for result in results {
-            output::emit(&mut out, &result, &output_format, &schema.hash_to_name, &fmt_opts)?;
+            output::emit(
+                &mut out,
+                &result,
+                &output_format,
+                &schema.hash_to_name,
+                &fmt_opts,
+            )?;
             emitted += 1;
         }
     }

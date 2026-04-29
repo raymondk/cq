@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use candid::types::Label;
 use candid::types::value::{IDLField, VariantValue};
 use candid::{IDLArgs, IDLValue};
@@ -87,7 +87,7 @@ enum Expr {
     /// `{a: expr, b: expr}` — record construction
     MakeRecord(Vec<(String, Box<Expr>)>),
     /// `[expr, expr, ...]` — vec construction
-    MakeVec(Vec<Box<Expr>>),
+    MakeVec(Vec<Expr>),
     /// `variant { Tag = expr }` or `variant { Tag }`
     MakeVariant(String, Option<Box<Expr>>),
     /// `principal "text"`
@@ -185,29 +185,25 @@ fn parse_pipe(s: &str) -> Result<(Expr, &str)> {
     let rest = rest.trim_start();
 
     // Check for 'as $x | body' before plain pipe
-    if let Some(after_as) = rest.strip_prefix("as") {
-        if after_as
+    if let Some(after_as) = rest.strip_prefix("as")
+        && after_as
             .chars()
             .next()
-            .map_or(true, |c| !c.is_alphanumeric() && c != '_')
-        {
-            let after_as = after_as.trim_start();
-            if let Some(after_dollar) = after_as.strip_prefix('$') {
-                let ident_end = after_dollar
-                    .find(|c: char| !c.is_alphanumeric() && c != '_')
-                    .unwrap_or(after_dollar.len());
-                if ident_end > 0 {
-                    let name = after_dollar[..ident_end].to_string();
-                    let after_name = after_dollar[ident_end..].trim_start();
-                    if let Some(after_pipe) = after_name.strip_prefix('|') {
-                        if !after_pipe.starts_with('/') {
-                            let (body, rest2) = parse_pipe(after_pipe.trim_start())?;
-                            return Ok((
-                                Expr::VarBind(name, Box::new(left), Box::new(body)),
-                                rest2,
-                            ));
-                        }
-                    }
+            .is_none_or(|c| !c.is_alphanumeric() && c != '_')
+    {
+        let after_as = after_as.trim_start();
+        if let Some(after_dollar) = after_as.strip_prefix('$') {
+            let ident_end = after_dollar
+                .find(|c: char| !c.is_alphanumeric() && c != '_')
+                .unwrap_or(after_dollar.len());
+            if ident_end > 0 {
+                let name = after_dollar[..ident_end].to_string();
+                let after_name = after_dollar[ident_end..].trim_start();
+                if let Some(after_pipe) = after_name.strip_prefix('|')
+                    && !after_pipe.starts_with('/')
+                {
+                    let (body, rest2) = parse_pipe(after_pipe.trim_start())?;
+                    return Ok((Expr::VarBind(name, Box::new(left), Box::new(body)), rest2));
                 }
             }
         }
@@ -255,14 +251,13 @@ fn try_parse_type_name(s: &str) -> Option<(TypeAscription, &str)> {
         ("int", TypeAscription::Int),
     ];
     for (kw, ta) in keywords {
-        if let Some(rest) = s.strip_prefix(kw) {
-            if rest
+        if let Some(rest) = s.strip_prefix(kw)
+            && rest
                 .chars()
                 .next()
-                .map_or(true, |c| !c.is_alphanumeric() && c != '_')
-            {
-                return Some((*ta, rest));
-            }
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_')
+        {
+            return Some((*ta, rest));
         }
     }
     None
@@ -285,17 +280,16 @@ fn parse_or(s: &str) -> Result<(Expr, &str)> {
     let (mut left, mut rest) = parse_and(s)?;
     loop {
         let r = rest.trim_start();
-        if let Some(after) = r.strip_prefix("or") {
-            if after
+        if let Some(after) = r.strip_prefix("or")
+            && after
                 .chars()
                 .next()
-                .map_or(true, |c| !c.is_alphanumeric() && c != '_')
-            {
-                let (right, rest2) = parse_and(after.trim_start())?;
-                left = Expr::BinBool(BoolOp::Or, Box::new(left), Box::new(right));
-                rest = rest2;
-                continue;
-            }
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_')
+        {
+            let (right, rest2) = parse_and(after.trim_start())?;
+            left = Expr::BinBool(BoolOp::Or, Box::new(left), Box::new(right));
+            rest = rest2;
+            continue;
         }
         break;
     }
@@ -307,17 +301,16 @@ fn parse_and(s: &str) -> Result<(Expr, &str)> {
     let (mut left, mut rest) = parse_not(s)?;
     loop {
         let r = rest.trim_start();
-        if let Some(after) = r.strip_prefix("and") {
-            if after
+        if let Some(after) = r.strip_prefix("and")
+            && after
                 .chars()
                 .next()
-                .map_or(true, |c| !c.is_alphanumeric() && c != '_')
-            {
-                let (right, rest2) = parse_not(after.trim_start())?;
-                left = Expr::BinBool(BoolOp::And, Box::new(left), Box::new(right));
-                rest = rest2;
-                continue;
-            }
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_')
+        {
+            let (right, rest2) = parse_not(after.trim_start())?;
+            left = Expr::BinBool(BoolOp::And, Box::new(left), Box::new(right));
+            rest = rest2;
+            continue;
         }
         break;
     }
@@ -327,15 +320,14 @@ fn parse_and(s: &str) -> Result<(Expr, &str)> {
 // not: "not" not_expr | cmp
 fn parse_not(s: &str) -> Result<(Expr, &str)> {
     let s = s.trim_start();
-    if let Some(after) = s.strip_prefix("not") {
-        if after
+    if let Some(after) = s.strip_prefix("not")
+        && after
             .chars()
             .next()
-            .map_or(true, |c| !c.is_alphanumeric() && c != '_')
-        {
-            let (inner, rest) = parse_not(after.trim_start())?;
-            return Ok((Expr::Not(Box::new(inner)), rest));
-        }
+            .is_none_or(|c| !c.is_alphanumeric() && c != '_')
+    {
+        let (inner, rest) = parse_not(after.trim_start())?;
+        return Ok((Expr::Not(Box::new(inner)), rest));
     }
     parse_cmp(s)
 }
@@ -415,7 +407,7 @@ fn parse_mul(s: &str) -> Result<(Expr, &str)> {
 fn keyword_boundary(s: &str) -> bool {
     s.chars()
         .next()
-        .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+        .is_none_or(|c| !c.is_alphanumeric() && c != '_')
 }
 
 // atom: literals | if | $x | select | some | none | principal | blob | variant | record | vec | dotchain
@@ -433,10 +425,10 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
     }
 
     // `if cond then a [elif cond then b]* else c end`
-    if let Some(after) = s.strip_prefix("if") {
-        if keyword_boundary(after) {
-            return parse_if(after.trim_start());
-        }
+    if let Some(after) = s.strip_prefix("if")
+        && keyword_boundary(after)
+    {
+        return parse_if(after.trim_start());
     }
 
     // `$x` — variable reference
@@ -451,22 +443,20 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
     }
 
     // `true` / `false` boolean literals
-    if let Some(after) = s.strip_prefix("true") {
-        if keyword_boundary(after) {
-            return Ok((Expr::Literal(IDLValue::Bool(true)), after));
-        }
+    if let Some(after) = s.strip_prefix("true")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::Literal(IDLValue::Bool(true)), after));
     }
-    if let Some(after) = s.strip_prefix("false") {
-        if keyword_boundary(after) {
-            return Ok((Expr::Literal(IDLValue::Bool(false)), after));
-        }
+    if let Some(after) = s.strip_prefix("false")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::Literal(IDLValue::Bool(false)), after));
     }
 
     // Non-negative integer literal: digits only
-    if s.chars().next().map_or(false, |c| c.is_ascii_digit()) {
-        let num_end = s
-            .find(|c: char| !c.is_ascii_digit())
-            .unwrap_or(s.len());
+    if s.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        let num_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
         let num_str = &s[..num_end];
         let rest = &s[num_end..];
         return Ok((Expr::Literal(IDLValue::Number(num_str.to_string())), rest));
@@ -499,10 +489,10 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
     }
 
     // `none` keyword (not followed by alphanumeric or '_')
-    if let Some(after) = s.strip_prefix("none") {
-        if keyword_boundary(after) {
-            return Ok((Expr::None_, after));
-        }
+    if let Some(after) = s.strip_prefix("none")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::None_, after));
     }
 
     // `some(pipe)`
@@ -546,13 +536,13 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
     }
 
     // `match { Tag1 = body1; Tag2 = body2; _ = default }` — variant dispatch
-    if let Some(after) = s.strip_prefix("match") {
-        if keyword_boundary(after) {
-            let after = after.trim_start();
-            if after.starts_with('{') {
-                let (arms, rest) = parse_match_arms(&after[1..])?;
-                return Ok((Expr::Match(arms), rest));
-            }
+    if let Some(after) = s.strip_prefix("match")
+        && keyword_boundary(after)
+    {
+        let after = after.trim_start();
+        if let Some(inner) = after.strip_prefix('{') {
+            let (arms, rest) = parse_match_arms(inner)?;
+            return Ok((Expr::Match(arms), rest));
         }
     }
 
@@ -569,102 +559,102 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
     // `variant { Tag = expr }` or `variant { Tag }`
     if let Some(after) = s.strip_prefix("variant") {
         let after = after.trim_start();
-        if after.starts_with('{') {
-            let (name, payload, rest) = parse_variant_constructor(&after[1..])?;
+        if let Some(inner) = after.strip_prefix('{') {
+            let (name, payload, rest) = parse_variant_constructor(inner)?;
             return Ok((Expr::MakeVariant(name, payload.map(Box::new)), rest));
         }
     }
 
     // `{ a: expr, b: expr }` — record construction
-    if s.starts_with('{') {
-        let (fields, rest) = parse_record_constructor(&s[1..])?;
+    if let Some(inner) = s.strip_prefix('{') {
+        let (fields, rest) = parse_record_constructor(inner)?;
         return Ok((Expr::MakeRecord(fields), rest));
     }
 
     // `[ expr, expr, ... ]` — vec construction
-    if s.starts_with('[') {
-        let (elems, rest) = parse_vec_constructor(&s[1..])?;
+    if let Some(inner) = s.strip_prefix('[') {
+        let (elems, rest) = parse_vec_constructor(inner)?;
         return Ok((Expr::MakeVec(elems), rest));
     }
 
     // --- Generic builtins (longer names before shorter to avoid prefix shadowing) ---
 
     // `from_hex` / `from_utf8` — must check `from_` before `from` alone
-    if let Some(after) = s.strip_prefix("from_hex") {
-        if keyword_boundary(after) {
-            return Ok((Expr::FromHex, after));
-        }
+    if let Some(after) = s.strip_prefix("from_hex")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::FromHex, after));
     }
-    if let Some(after) = s.strip_prefix("from_utf8") {
-        if keyword_boundary(after) {
-            return Ok((Expr::FromUtf8, after));
-        }
+    if let Some(after) = s.strip_prefix("from_utf8")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::FromUtf8, after));
     }
 
     // `to_principal` before `to_` prefix alternatives
-    if let Some(after) = s.strip_prefix("to_principal") {
-        if keyword_boundary(after) {
-            return Ok((Expr::ToPrincipal, after));
-        }
+    if let Some(after) = s.strip_prefix("to_principal")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::ToPrincipal, after));
     }
-    if let Some(after) = s.strip_prefix("to_float") {
-        if keyword_boundary(after) {
-            return Ok((Expr::ToFloat, after));
-        }
+    if let Some(after) = s.strip_prefix("to_float")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::ToFloat, after));
     }
-    if let Some(after) = s.strip_prefix("to_text") {
-        if keyword_boundary(after) {
-            return Ok((Expr::ToText, after));
-        }
+    if let Some(after) = s.strip_prefix("to_text")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::ToText, after));
     }
-    if let Some(after) = s.strip_prefix("to_utf8") {
-        if keyword_boundary(after) {
-            return Ok((Expr::ToUtf8, after));
-        }
+    if let Some(after) = s.strip_prefix("to_utf8")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::ToUtf8, after));
     }
-    if let Some(after) = s.strip_prefix("to_hex") {
-        if keyword_boundary(after) {
-            return Ok((Expr::ToHex, after));
-        }
+    if let Some(after) = s.strip_prefix("to_hex")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::ToHex, after));
     }
-    if let Some(after) = s.strip_prefix("to_int") {
-        if keyword_boundary(after) {
-            return Ok((Expr::ToInt, after));
-        }
+    if let Some(after) = s.strip_prefix("to_int")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::ToInt, after));
     }
 
     // `is_some` / `is_none`
-    if let Some(after) = s.strip_prefix("is_some") {
-        if keyword_boundary(after) {
-            return Ok((Expr::IsSome, after));
-        }
+    if let Some(after) = s.strip_prefix("is_some")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::IsSome, after));
     }
-    if let Some(after) = s.strip_prefix("is_none") {
-        if keyword_boundary(after) {
-            return Ok((Expr::IsNone, after));
-        }
+    if let Some(after) = s.strip_prefix("is_none")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::IsNone, after));
     }
 
     // `length` / `keys` / `values` / `type`
-    if let Some(after) = s.strip_prefix("length") {
-        if keyword_boundary(after) {
-            return Ok((Expr::Length, after));
-        }
+    if let Some(after) = s.strip_prefix("length")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::Length, after));
     }
-    if let Some(after) = s.strip_prefix("keys") {
-        if keyword_boundary(after) {
-            return Ok((Expr::Keys, after));
-        }
+    if let Some(after) = s.strip_prefix("keys")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::Keys, after));
     }
-    if let Some(after) = s.strip_prefix("values") {
-        if keyword_boundary(after) {
-            return Ok((Expr::Values, after));
-        }
+    if let Some(after) = s.strip_prefix("values")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::Values, after));
     }
-    if let Some(after) = s.strip_prefix("type") {
-        if keyword_boundary(after) {
-            return Ok((Expr::TypeOf, after));
-        }
+    if let Some(after) = s.strip_prefix("type")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::TypeOf, after));
     }
 
     // `sort_by(filter)` before `sort` to avoid prefix collision
@@ -676,10 +666,10 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
             .ok_or_else(|| anyhow::anyhow!("expected ')' after sort_by(...)"))?;
         return Ok((Expr::SortBy(Box::new(inner)), rest));
     }
-    if let Some(after) = s.strip_prefix("sort") {
-        if keyword_boundary(after) {
-            return Ok((Expr::Sort, after));
-        }
+    if let Some(after) = s.strip_prefix("sort")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::Sort, after));
     }
     if let Some(after) = s.strip_prefix("group_by(") {
         let (inner, rest) = parse_pipe(after.trim_start())?;
@@ -689,10 +679,10 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
             .ok_or_else(|| anyhow::anyhow!("expected ')' after group_by(...)"))?;
         return Ok((Expr::GroupBy(Box::new(inner)), rest));
     }
-    if let Some(after) = s.strip_prefix("unique") {
-        if keyword_boundary(after) {
-            return Ok((Expr::Unique, after));
-        }
+    if let Some(after) = s.strip_prefix("unique")
+        && keyword_boundary(after)
+    {
+        return Ok((Expr::Unique, after));
     }
 
     // `has(expr)` / `contains(expr)` / `map(expr)`
@@ -741,16 +731,16 @@ fn parse_if(s: &str) -> Result<(Expr, &str)> {
     // Parse elif chains
     loop {
         let r = rest.trim_start();
-        if let Some(after_elif) = r.strip_prefix("elif") {
-            if keyword_boundary(after_elif) {
-                let (cond, r2) = parse_pipe(after_elif.trim_start())?;
-                let r2 = r2.trim_start();
-                let r2 = expect_keyword(r2, "then", "expected 'then' after elif condition")?;
-                let (then_body, r3) = parse_pipe(r2.trim_start())?;
-                branches.push((Box::new(cond), Box::new(then_body)));
-                rest = r3;
-                continue;
-            }
+        if let Some(after_elif) = r.strip_prefix("elif")
+            && keyword_boundary(after_elif)
+        {
+            let (cond, r2) = parse_pipe(after_elif.trim_start())?;
+            let r2 = r2.trim_start();
+            let r2 = expect_keyword(r2, "then", "expected 'then' after elif condition")?;
+            let (then_body, r3) = parse_pipe(r2.trim_start())?;
+            branches.push((Box::new(cond), Box::new(then_body)));
+            rest = r3;
+            continue;
         }
         break;
     }
@@ -777,10 +767,10 @@ fn parse_if(s: &str) -> Result<(Expr, &str)> {
 
 /// Consume a keyword at the start of `s`, returning the remaining string.
 fn expect_keyword<'a>(s: &'a str, kw: &str, msg: &str) -> Result<&'a str> {
-    if let Some(after) = s.strip_prefix(kw) {
-        if keyword_boundary(after) {
-            return Ok(after);
-        }
+    if let Some(after) = s.strip_prefix(kw)
+        && keyword_boundary(after)
+    {
+        return Ok(after);
     }
     bail!("{msg}")
 }
@@ -800,16 +790,16 @@ fn parse_dotchain(s: &str) -> Result<(Expr, &str)> {
             .unwrap_or(after_dot.len());
         let (ident, rest) = after_dot.split_at(ident_end);
         if ident.is_empty() {
-            if rest.starts_with('?') {
-                (Expr::OptUnwrap, &rest[1..])
+            if let Some(after) = rest.strip_prefix('?') {
+                (Expr::OptUnwrap, after)
             } else {
                 (Expr::Identity, rest)
             }
         } else {
-            let (mode, rest) = if rest.starts_with('?') {
-                (OptMode::Optional, &rest[1..])
-            } else if rest.starts_with('!') {
-                (OptMode::Assert, &rest[1..])
+            let (mode, rest) = if let Some(r) = rest.strip_prefix('?') {
+                (OptMode::Optional, r)
+            } else if let Some(r) = rest.strip_prefix('!') {
+                (OptMode::Assert, r)
             } else {
                 (OptMode::Normal, rest)
             };
@@ -823,8 +813,7 @@ fn parse_dotchain(s: &str) -> Result<(Expr, &str)> {
 fn chain_tail(atom: Expr, rest: &str) -> Result<(Expr, &str)> {
     let rest_trimmed = rest.trim_start();
     if rest_trimmed.starts_with('.')
-        && rest_trimmed[1..]
-            .starts_with(|c: char| c.is_alphabetic() || c == '_' || c == '[')
+        && rest_trimmed[1..].starts_with(|c: char| c.is_alphabetic() || c == '_' || c == '[')
     {
         let (right, rest2) = parse_dotchain(rest_trimmed)?;
         Ok((Expr::Pipe(Box::new(atom), Box::new(right)), rest2))
@@ -845,8 +834,7 @@ fn parse_bracket(s: &str) -> Result<(Expr, &str)> {
     let after_first = after_first.trim_start();
 
     if let Some(rest) = after_first.strip_prefix(']') {
-        let n = first_num
-            .ok_or_else(|| anyhow::anyhow!("expected index number inside '[]'"))?;
+        let n = first_num.ok_or_else(|| anyhow::anyhow!("expected index number inside '[]'"))?;
         return Ok((Expr::Index(n), rest));
     }
 
@@ -863,9 +851,7 @@ fn parse_bracket(s: &str) -> Result<(Expr, &str)> {
 }
 
 fn parse_optional_usize(s: &str) -> Result<(Option<usize>, &str)> {
-    let num_end = s
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(s.len());
+    let num_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
     if num_end == 0 {
         return Ok((None, s));
     }
@@ -876,6 +862,7 @@ fn parse_optional_usize(s: &str) -> Result<(Option<usize>, &str)> {
 }
 
 // Parse `{field: expr, field: expr}` — caller consumed the leading `{`
+#[allow(clippy::type_complexity)]
 fn parse_record_constructor(s: &str) -> Result<(Vec<(String, Box<Expr>)>, &str)> {
     let mut fields = Vec::new();
     let mut rest = s.trim_start();
@@ -909,7 +896,7 @@ fn parse_record_constructor(s: &str) -> Result<(Vec<(String, Box<Expr>)>, &str)>
 }
 
 // Parse `[expr, expr, ...]` — caller consumed the leading `[`
-fn parse_vec_constructor(s: &str) -> Result<(Vec<Box<Expr>>, &str)> {
+fn parse_vec_constructor(s: &str) -> Result<(Vec<Expr>, &str)> {
     let mut elems = Vec::new();
     let mut rest = s.trim_start();
     if let Some(after) = rest.strip_prefix(']') {
@@ -917,7 +904,7 @@ fn parse_vec_constructor(s: &str) -> Result<(Vec<Box<Expr>>, &str)> {
     }
     loop {
         let (expr, after_expr) = parse_pipe(rest.trim_start())?;
-        elems.push(Box::new(expr));
+        elems.push(expr);
         rest = after_expr.trim_start();
         if let Some(after) = rest.strip_prefix(']') {
             return Ok((elems, after));
@@ -956,6 +943,7 @@ fn parse_variant_constructor(s: &str) -> Result<(String, Option<Expr>, &str)> {
 }
 
 // Parse `{ Tag1 = body1; Tag2 = body2; _ = default }` — caller consumed the leading `{`
+#[allow(clippy::type_complexity)]
 fn parse_match_arms(s: &str) -> Result<(Vec<(MatchArm, Box<Expr>)>, &str)> {
     let mut arms: Vec<(MatchArm, Box<Expr>)> = Vec::new();
     let mut rest = s.trim_start();
@@ -970,7 +958,7 @@ fn parse_match_arms(s: &str) -> Result<(Vec<(MatchArm, Box<Expr>)>, &str)> {
             if after
                 .chars()
                 .next()
-                .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_')
             {
                 rest = after;
                 MatchArm::Default
@@ -1276,9 +1264,9 @@ fn eval_cmp(op: CmpOp, a: Num, b: Num) -> Result<bool> {
         (Num::Float(_), Num::Unsigned(_))
         | (Num::Float(_), Num::Signed(_))
         | (Num::Unsigned(_), Num::Float(_))
-        | (Num::Signed(_), Num::Float(_)) => bail!(
-            "cannot compare float and integer; use to_float or to_int for conversion"
-        ),
+        | (Num::Signed(_), Num::Float(_)) => {
+            bail!("cannot compare float and integer; use to_float or to_int for conversion")
+        }
         (Num::Float(af), Num::Float(bf)) => Ok(match op {
             CmpOp::Eq => af == bf,
             CmpOp::Ne => af != bf,
@@ -1319,11 +1307,7 @@ pub fn evaluate(args: IDLArgs, expr: Option<&str>) -> Result<Vec<IDLArgs>> {
     eval_expr(&query, args, &HashMap::new())
 }
 
-fn eval_expr(
-    expr: &Expr,
-    args: IDLArgs,
-    env: &HashMap<String, IDLValue>,
-) -> Result<Vec<IDLArgs>> {
+fn eval_expr(expr: &Expr, args: IDLArgs, env: &HashMap<String, IDLValue>) -> Result<Vec<IDLArgs>> {
     match expr {
         Expr::Identity => Ok(vec![args]),
         Expr::Field(name, mode) => {
@@ -1358,10 +1342,8 @@ fn eval_expr(
         }
         Expr::Alt(left, right) => {
             let results = eval_expr(left, args.clone(), env)?;
-            let unwrapped: Vec<IDLArgs> = results
-                .into_iter()
-                .filter_map(unwrap_opt_filter)
-                .collect();
+            let unwrapped: Vec<IDLArgs> =
+                results.into_iter().filter_map(unwrap_opt_filter).collect();
             if unwrapped.is_empty() {
                 eval_expr(right, args, env)
             } else {
@@ -1477,16 +1459,22 @@ fn eval_expr(
                 .collect()
         }
 
-        Expr::Literal(v) => Ok(vec![IDLArgs::new(&[v.clone()])]),
+        Expr::Literal(v) => Ok(vec![IDLArgs::new(std::slice::from_ref(v))]),
 
         Expr::BinArith(op, left, right) => {
             let l_results = eval_expr(left, args.clone(), env)?;
             if l_results.len() != 1 || l_results[0].args.len() != 1 {
-                bail!("'{}' requires a single value on the left side", arith_op_display(*op));
+                bail!(
+                    "'{}' requires a single value on the left side",
+                    arith_op_display(*op)
+                );
             }
             let r_results = eval_expr(right, args, env)?;
             if r_results.len() != 1 || r_results[0].args.len() != 1 {
-                bail!("'{}' requires a single value on the right side", arith_op_display(*op));
+                bail!(
+                    "'{}' requires a single value on the right side",
+                    arith_op_display(*op)
+                );
             }
             let lval = &l_results[0].args[0];
             let rval = &r_results[0].args[0];
@@ -1511,11 +1499,17 @@ fn eval_expr(
         Expr::BinCmp(op, left, right) => {
             let l_results = eval_expr(left, args.clone(), env)?;
             if l_results.len() != 1 || l_results[0].args.len() != 1 {
-                bail!("'{}' requires a single value on the left side", cmp_op_display(*op));
+                bail!(
+                    "'{}' requires a single value on the left side",
+                    cmp_op_display(*op)
+                );
             }
             let r_results = eval_expr(right, args, env)?;
             if r_results.len() != 1 || r_results[0].args.len() != 1 {
-                bail!("'{}' requires a single value on the right side", cmp_op_display(*op));
+                bail!(
+                    "'{}' requires a single value on the right side",
+                    cmp_op_display(*op)
+                );
             }
             let lval = &l_results[0].args[0];
             let rval = &r_results[0].args[0];
@@ -1662,10 +1656,7 @@ fn eval_expr(
                     let tag = label_display(&v.0.id);
                     Ok(vec![IDLArgs::new(&[IDLValue::Text(tag)])])
                 }
-                other => bail!(
-                    "tag() requires a variant value, got {}",
-                    type_name(other)
-                ),
+                other => bail!("tag() requires a variant value, got {}", type_name(other)),
             }
         }
 
@@ -1678,10 +1669,7 @@ fn eval_expr(
                 match &cond_result[0].args[0] {
                     IDLValue::Bool(true) => return eval_expr(then_body, args, env),
                     IDLValue::Bool(false) => continue,
-                    other => bail!(
-                        "if condition must be a bool, got {}",
-                        type_name(other)
-                    ),
+                    other => bail!("if condition must be a bool, got {}", type_name(other)),
                 }
             }
             if let Some(else_body) = else_branch {
@@ -1712,7 +1700,7 @@ fn eval_expr(
             let val = env
                 .get(name)
                 .ok_or_else(|| anyhow::anyhow!("undefined variable ${name}"))?;
-            Ok(vec![IDLArgs::new(&[val.clone()])])
+            Ok(vec![IDLArgs::new(std::slice::from_ref(val))])
         }
 
         Expr::StrInterp(parts) => {
@@ -1741,7 +1729,10 @@ fn eval_expr(
                 IDLValue::Vec(items) => items.len() as u64,
                 IDLValue::Text(s) => s.chars().count() as u64,
                 IDLValue::Blob(bytes) => bytes.len() as u64,
-                other => bail!("length requires vec, text, or blob, got {}", type_name(other)),
+                other => bail!(
+                    "length requires vec, text, or blob, got {}",
+                    type_name(other)
+                ),
             };
             Ok(vec![IDLArgs::new(&[IDLValue::Nat(candid::Nat::from(n))])])
         }
@@ -1750,7 +1741,7 @@ fn eval_expr(
             let val = require_single_val(&args, "keys")?;
             match val {
                 IDLValue::Record(mut fields) => {
-                    fields.sort_by(|a, b| label_display(&a.id).cmp(&label_display(&b.id)));
+                    fields.sort_by_key(|a| label_display(&a.id));
                     let keys: Vec<IDLValue> = fields
                         .iter()
                         .map(|f| IDLValue::Text(label_display(&f.id)))
@@ -1765,7 +1756,7 @@ fn eval_expr(
             let val = require_single_val(&args, "values")?;
             match val {
                 IDLValue::Record(mut fields) => {
-                    fields.sort_by(|a, b| label_display(&a.id).cmp(&label_display(&b.id)));
+                    fields.sort_by_key(|a| label_display(&a.id));
                     let vals: Vec<IDLValue> = fields.into_iter().map(|f| f.val).collect();
                     Ok(vec![IDLArgs::new(&[IDLValue::Vec(vals)])])
                 }
@@ -1809,9 +1800,9 @@ fn eval_expr(
             let val = require_single_val(&args, "contains")?;
             match &val {
                 IDLValue::Text(s) => match needle {
-                    IDLValue::Text(sub) => {
-                        Ok(vec![IDLArgs::new(&[IDLValue::Bool(s.contains(sub.as_str()))])])
-                    }
+                    IDLValue::Text(sub) => Ok(vec![IDLArgs::new(&[IDLValue::Bool(
+                        s.contains(sub.as_str()),
+                    )])]),
                     other => bail!(
                         "contains() on text requires a text argument, got {}",
                         type_name(other)
@@ -1821,10 +1812,7 @@ fn eval_expr(
                     let found = items.iter().any(|item| item == needle);
                     Ok(vec![IDLArgs::new(&[IDLValue::Bool(found)])])
                 }
-                other => bail!(
-                    "contains() requires text or vec, got {}",
-                    type_name(other)
-                ),
+                other => bail!("contains() requires text or vec, got {}", type_name(other)),
             }
         }
 
@@ -1868,7 +1856,7 @@ fn eval_expr(
                 IDLValue::Int8(n) => BigInt::from(*n as i64),
                 IDLValue::Int16(n) => BigInt::from(*n as i64),
                 IDLValue::Int32(n) => BigInt::from(*n as i64),
-                IDLValue::Int64(n) => BigInt::from(*n as i64),
+                IDLValue::Int64(n) => BigInt::from(*n),
                 IDLValue::Float32(f) => BigInt::from(*f as i64),
                 IDLValue::Float64(f) => BigInt::from(*f as i64),
                 IDLValue::Text(s) => s
@@ -1915,8 +1903,9 @@ fn eval_expr(
             let val = require_single_val(&args, "to_principal")?;
             match val {
                 IDLValue::Text(s) => {
-                    let p = candid::Principal::from_text(&s)
-                        .map_err(|e| anyhow::anyhow!("to_principal: invalid principal {:?}: {e}", s))?;
+                    let p = candid::Principal::from_text(&s).map_err(|e| {
+                        anyhow::anyhow!("to_principal: invalid principal {:?}: {e}", s)
+                    })?;
                     Ok(vec![IDLArgs::new(&[IDLValue::Principal(p)])])
                 }
                 other => bail!("to_principal requires text, got {}", type_name(&other)),
@@ -1948,9 +1937,7 @@ fn eval_expr(
         Expr::ToUtf8 => {
             let val = require_single_val(&args, "to_utf8")?;
             match val {
-                IDLValue::Text(s) => {
-                    Ok(vec![IDLArgs::new(&[IDLValue::Blob(s.into_bytes())])])
-                }
+                IDLValue::Text(s) => Ok(vec![IDLArgs::new(&[IDLValue::Blob(s.into_bytes())])]),
                 other => bail!("to_utf8 requires text, got {}", type_name(&other)),
             }
         }
@@ -2012,12 +1999,22 @@ fn eval_expr(
                     let mut keyed: Vec<(IDLValue, IDLValue)> = items
                         .into_iter()
                         .map(|item| {
-                            let item_args = IDLArgs::new(&[item.clone()]);
+                            let item_args = IDLArgs::new(std::slice::from_ref(&item));
                             let key_results = eval_expr(filter, item_args, env)?;
                             if key_results.len() != 1 || key_results[0].args.len() != 1 {
                                 bail!("sort_by filter must produce exactly one value per element");
                             }
-                            Ok((key_results.into_iter().next().unwrap().args.into_iter().next().unwrap(), item))
+                            Ok((
+                                key_results
+                                    .into_iter()
+                                    .next()
+                                    .unwrap()
+                                    .args
+                                    .into_iter()
+                                    .next()
+                                    .unwrap(),
+                                item,
+                            ))
                         })
                         .collect::<Result<Vec<_>>>()?;
                     let mut sort_err: Option<anyhow::Error> = None;
@@ -2043,12 +2040,19 @@ fn eval_expr(
                 IDLValue::Vec(items) => {
                     let mut groups: Vec<(IDLValue, Vec<IDLValue>)> = Vec::new();
                     for item in items {
-                        let item_args = IDLArgs::new(&[item.clone()]);
+                        let item_args = IDLArgs::new(std::slice::from_ref(&item));
                         let key_results = eval_expr(filter, item_args, env)?;
                         if key_results.len() != 1 || key_results[0].args.len() != 1 {
                             bail!("group_by filter must produce exactly one value per element");
                         }
-                        let key = key_results.into_iter().next().unwrap().args.into_iter().next().unwrap();
+                        let key = key_results
+                            .into_iter()
+                            .next()
+                            .unwrap()
+                            .args
+                            .into_iter()
+                            .next()
+                            .unwrap();
                         if let Some((_, group)) = groups.iter_mut().find(|(k, _)| k == &key) {
                             group.push(item);
                         } else {
@@ -2096,9 +2100,7 @@ fn cmp_idl_values(a: &IDLValue, b: &IDLValue) -> Result<std::cmp::Ordering> {
         }
         (IDLValue::Bool(a), IDLValue::Bool(b)) => Ok(a.cmp(b)),
         (IDLValue::Text(a), IDLValue::Text(b)) => Ok(a.cmp(b)),
-        (IDLValue::Principal(a), IDLValue::Principal(b)) => {
-            Ok(a.to_text().cmp(&b.to_text()))
-        }
+        (IDLValue::Principal(a), IDLValue::Principal(b)) => Ok(a.to_text().cmp(&b.to_text())),
         _ => {
             let na = to_num(a).map_err(|_| {
                 anyhow::anyhow!(
@@ -2118,9 +2120,9 @@ fn cmp_idl_values(a: &IDLValue, b: &IDLValue) -> Result<std::cmp::Ordering> {
                 (Num::Float(fa), Num::Float(fb)) => {
                     Ok(fa.partial_cmp(&fb).unwrap_or(std::cmp::Ordering::Equal))
                 }
-                (Num::Float(_), _) | (_, Num::Float(_)) => bail!(
-                    "cannot mix float and integer in sort; use to_float or to_int"
-                ),
+                (Num::Float(_), _) | (_, Num::Float(_)) => {
+                    bail!("cannot mix float and integer in sort; use to_float or to_int")
+                }
                 (a, b) => {
                     let ai = num_to_bigint(a);
                     let bi = num_to_bigint(b);
@@ -2131,11 +2133,7 @@ fn cmp_idl_values(a: &IDLValue, b: &IDLValue) -> Result<std::cmp::Ordering> {
     }
 }
 
-fn eval_single_bool(
-    expr: &Expr,
-    args: IDLArgs,
-    env: &HashMap<String, IDLValue>,
-) -> Result<bool> {
+fn eval_single_bool(expr: &Expr, args: IDLArgs, env: &HashMap<String, IDLValue>) -> Result<bool> {
     let results = eval_expr(expr, args, env)?;
     if results.len() != 1 || results[0].args.len() != 1 {
         bail!("boolean operation requires a single boolean value");
@@ -2393,12 +2391,9 @@ fn extract_iter(args: &IDLArgs) -> Result<Vec<IDLArgs>> {
     match &args.args[0] {
         IDLValue::Vec(items) => Ok(items
             .iter()
-            .map(|v| IDLArgs::new(&[v.clone()]))
+            .map(|v| IDLArgs::new(std::slice::from_ref(v)))
             .collect()),
-        other => bail!(
-            "iterator '.[]' requires a vec, got {}",
-            type_name(other)
-        ),
+        other => bail!("iterator '.[]' requires a vec, got {}", type_name(other)),
     }
 }
 
@@ -2512,11 +2507,11 @@ fn levenshtein(a: &str, b: &str) -> usize {
     let la = a.len();
     let lb = b.len();
     let mut dp = vec![vec![0usize; lb + 1]; la + 1];
-    for i in 0..=la {
-        dp[i][0] = i;
+    for (i, row) in dp.iter_mut().enumerate() {
+        row[0] = i;
     }
-    for j in 0..=lb {
-        dp[0][j] = j;
+    for (j, cell) in dp[0].iter_mut().enumerate() {
+        *cell = j;
     }
     for i in 1..=la {
         for j in 1..=lb {

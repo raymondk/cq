@@ -25,7 +25,8 @@ impl InputFormat {
 
 /// Peek at the first bytes and guess the format.
 pub fn detect(peek: &[u8]) -> InputFormat {
-    let trimmed: &[u8] = peek.iter()
+    let trimmed: &[u8] = peek
+        .iter()
         .position(|b| !b.is_ascii_whitespace())
         .map(|i| &peek[i..])
         .unwrap_or(&[]);
@@ -103,7 +104,11 @@ struct TextStream<R: BufRead> {
 
 impl<R: BufRead> TextStream<R> {
     fn new(reader: R) -> Self {
-        TextStream { reader, buf: String::new(), eof: false }
+        TextStream {
+            reader,
+            buf: String::new(),
+            eof: false,
+        }
     }
 
     /// Drain one complete `(…)` group from `self.buf`, returning it.
@@ -137,12 +142,12 @@ impl<R: BufRead> TextStream<R> {
                 }
                 b')' => {
                     depth -= 1;
-                    if depth == 0 {
-                        if let Some(start) = group_start.take() {
-                            let group = self.buf[start..=i].to_owned();
-                            self.buf.drain(..=i);
-                            return Some(group);
-                        }
+                    if depth == 0
+                        && let Some(start) = group_start.take()
+                    {
+                        let group = self.buf[start..=i].to_owned();
+                        self.buf.drain(..=i);
+                        return Some(group);
                     }
                 }
                 _ => {}
@@ -216,7 +221,7 @@ impl<R: BufRead> Iterator for HexStream<R> {
                     return Some(
                         hex::decode(trimmed)
                             .with_context(|| {
-                                if trimmed.len() % 2 != 0 {
+                                if !trimmed.len().is_multiple_of(2) {
                                     format!("invalid hex (odd length): {trimmed}")
                                 } else {
                                     format!("invalid hex: {trimmed}")
@@ -262,8 +267,8 @@ impl Iterator for BinStream {
             Ok(n) => n,
             Err(e) => return Some(Err(e)),
         };
-        let result = IDLArgs::from_bytes(&self.buf[..size])
-            .context("failed to decode binary Candid frame");
+        let result =
+            IDLArgs::from_bytes(&self.buf[..size]).context("failed to decode binary Candid frame");
         self.buf.drain(..size);
         Some(result)
     }
