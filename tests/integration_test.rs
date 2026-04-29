@@ -2109,3 +2109,87 @@ fn unique_no_duplicates() {
         .success()
         .stdout("(vec { 1 : nat; 2 : nat; 3 : nat })\n");
 }
+
+// --- Slice 13: --did schema loader ---
+
+#[test]
+fn did_without_schema_shows_hash() {
+    // Binary-decoded record without --did renders field as numeric hash
+    cq()
+        .args(["--input-format", "hex"])
+        .write_stdin("4449444c016c01868eb7027d01002a")
+        .assert()
+        .success()
+        .stdout("(record { 5_097_222 = 42 : nat })\n");
+}
+
+#[test]
+fn did_with_schema_resolves_record_field() {
+    // Binary-decoded record with --did renders original field name
+    cq()
+        .args(["--input-format", "hex", "--did", "tests/fixtures/schema1.did"])
+        .write_stdin("4449444c016c01868eb7027d01002a")
+        .assert()
+        .success()
+        .stdout("(record { foo = 42 : nat })\n");
+}
+
+#[test]
+fn did_without_schema_shows_variant_hash() {
+    // Binary-decoded variant without --did renders tag as numeric hash
+    cq()
+        .args(["--input-format", "hex"])
+        .write_stdin("4449444c016b01bc8a017d0100002a")
+        .assert()
+        .success()
+        .stdout("(variant { 17_724 = 42 : nat })\n");
+}
+
+#[test]
+fn did_with_schema_resolves_variant_tag() {
+    // Binary-decoded variant with --did renders original tag name
+    cq()
+        .args(["--input-format", "hex", "--did", "tests/fixtures/schema1.did"])
+        .write_stdin("4449444c016b01bc8a017d0100002a")
+        .assert()
+        .success()
+        .stdout("(variant { Ok = 42 : nat })\n");
+}
+
+#[test]
+fn did_multiple_flags_union_schemas() {
+    // --did can be specified multiple times; names from both files are resolved
+    cq()
+        .args([
+            "--input-format",
+            "hex",
+            "--did",
+            "tests/fixtures/schema1.did",
+            "--did",
+            "tests/fixtures/schema2.did",
+        ])
+        .write_stdin("4449444c016c01dbe3aa027e010001")
+        .assert()
+        .success()
+        .stdout("(record { baz = true })\n");
+}
+
+#[test]
+fn did_file_not_found_error() {
+    cq()
+        .args(["--did", "nonexistent.did"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .failure()
+        .stderr(contains("failed to read nonexistent.did"));
+}
+
+#[test]
+fn did_file_malformed_error() {
+    cq()
+        .args(["--did", "tests/fixtures/bad.did"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .failure()
+        .stderr(contains("failed to parse tests/fixtures/bad.did"));
+}

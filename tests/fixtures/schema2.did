@@ -1,0 +1,4 @@
+type Extra = record { baz : bool };
+service : {
+  extra : () -> (Extra);
+};

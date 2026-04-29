@@ -14,7 +14,7 @@ pub struct Args {
     #[arg(long, value_name = "FORMAT")]
     pub output: Option<String>,
 
-    /// Path to .did schema file
+    /// Path to .did schema file (can be specified multiple times)
     #[arg(long, value_name = "PATH")]
-    pub did: Option<std::path::PathBuf>,
+    pub did: Vec<std::path::PathBuf>,
 }

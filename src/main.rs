@@ -20,7 +20,8 @@ fn run() -> Result<()> {
         None => output::OutputFormat::Text,
     };
 
-    let _schema = schema::SchemaResolver::load(args.did.as_deref())?;
+    let did_refs: Vec<&std::path::Path> = args.did.iter().map(|p| p.as_path()).collect();
+    let schema = schema::SchemaResolver::load(&did_refs)?;
 
     let stdin = std::io::stdin().lock();
     let reader = std::io::BufReader::new(stdin);
@@ -33,7 +34,7 @@ fn run() -> Result<()> {
         let args_val = value_result?;
         let results = query::evaluate(args_val, args.query.as_deref())?;
         for result in results {
-            output::emit(&mut out, &result, &output_format)?;
+            output::emit(&mut out, &result, &output_format, &schema.hash_to_name)?;
         }
     }
 

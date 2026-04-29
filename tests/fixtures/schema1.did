@@ -1,0 +1,6 @@
+type Result = variant { Ok : nat; Err : text };
+type MyRecord = record { foo : nat; bar : text };
+service : {
+  get : () -> (MyRecord);
+  call : () -> (Result);
+};
