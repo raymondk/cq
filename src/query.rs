@@ -156,6 +156,14 @@ enum Expr {
     IsSome,
     /// `is_none` — opt-None → true, opt-Some → false
     IsNone,
+    /// `sort` — sort a vec by natural ordering
+    Sort,
+    /// `sort_by(filter)` — sort a vec by the filter's value over each element
+    SortBy(Box<Expr>),
+    /// `group_by(filter)` — group elements by filter value; returns vec-of-vecs
+    GroupBy(Box<Expr>),
+    /// `unique` — deduplicate a vec preserving first-occurrence order
+    Unique,
 }
 
 // ---------------------------------------------------------------------------
@@ -656,6 +664,34 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
     if let Some(after) = s.strip_prefix("type") {
         if keyword_boundary(after) {
             return Ok((Expr::TypeOf, after));
+        }
+    }
+
+    // `sort_by(filter)` before `sort` to avoid prefix collision
+    if let Some(after) = s.strip_prefix("sort_by(") {
+        let (inner, rest) = parse_pipe(after.trim_start())?;
+        let rest = rest.trim_start();
+        let rest = rest
+            .strip_prefix(')')
+            .ok_or_else(|| anyhow::anyhow!("expected ')' after sort_by(...)"))?;
+        return Ok((Expr::SortBy(Box::new(inner)), rest));
+    }
+    if let Some(after) = s.strip_prefix("sort") {
+        if keyword_boundary(after) {
+            return Ok((Expr::Sort, after));
+        }
+    }
+    if let Some(after) = s.strip_prefix("group_by(") {
+        let (inner, rest) = parse_pipe(after.trim_start())?;
+        let rest = rest.trim_start();
+        let rest = rest
+            .strip_prefix(')')
+            .ok_or_else(|| anyhow::anyhow!("expected ')' after group_by(...)"))?;
+        return Ok((Expr::GroupBy(Box::new(inner)), rest));
+    }
+    if let Some(after) = s.strip_prefix("unique") {
+        if keyword_boundary(after) {
+            return Ok((Expr::Unique, after));
         }
     }
 
@@ -1892,6 +1928,150 @@ fn eval_expr(
                 IDLValue::Opt(_) => Ok(vec![IDLArgs::new(&[IDLValue::Bool(false)])]),
                 IDLValue::None => Ok(vec![IDLArgs::new(&[IDLValue::Bool(true)])]),
                 other => bail!("is_none requires an opt value, got {}", type_name(&other)),
+            }
+        }
+
+        Expr::Sort => {
+            let val = require_single_val(&args, "sort")?;
+            match val {
+                IDLValue::Vec(mut items) => {
+                    let mut sort_err: Option<anyhow::Error> = None;
+                    items.sort_by(|a, b| {
+                        cmp_idl_values(a, b).unwrap_or_else(|e| {
+                            sort_err = Some(e);
+                            std::cmp::Ordering::Equal
+                        })
+                    });
+                    if let Some(e) = sort_err {
+                        return Err(e);
+                    }
+                    Ok(vec![IDLArgs::new(&[IDLValue::Vec(items)])])
+                }
+                other => bail!("sort requires a vec, got {}", type_name(&other)),
+            }
+        }
+
+        Expr::SortBy(filter) => {
+            let val = require_single_val(&args, "sort_by")?;
+            match val {
+                IDLValue::Vec(items) => {
+                    let mut keyed: Vec<(IDLValue, IDLValue)> = items
+                        .into_iter()
+                        .map(|item| {
+                            let item_args = IDLArgs::new(&[item.clone()]);
+                            let key_results = eval_expr(filter, item_args, env)?;
+                            if key_results.len() != 1 || key_results[0].args.len() != 1 {
+                                bail!("sort_by filter must produce exactly one value per element");
+                            }
+                            Ok((key_results.into_iter().next().unwrap().args.into_iter().next().unwrap(), item))
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let mut sort_err: Option<anyhow::Error> = None;
+                    keyed.sort_by(|(ka, _), (kb, _)| {
+                        cmp_idl_values(ka, kb).unwrap_or_else(|e| {
+                            sort_err = Some(e);
+                            std::cmp::Ordering::Equal
+                        })
+                    });
+                    if let Some(e) = sort_err {
+                        return Err(e);
+                    }
+                    let sorted: Vec<IDLValue> = keyed.into_iter().map(|(_, v)| v).collect();
+                    Ok(vec![IDLArgs::new(&[IDLValue::Vec(sorted)])])
+                }
+                other => bail!("sort_by requires a vec, got {}", type_name(&other)),
+            }
+        }
+
+        Expr::GroupBy(filter) => {
+            let val = require_single_val(&args, "group_by")?;
+            match val {
+                IDLValue::Vec(items) => {
+                    let mut groups: Vec<(IDLValue, Vec<IDLValue>)> = Vec::new();
+                    for item in items {
+                        let item_args = IDLArgs::new(&[item.clone()]);
+                        let key_results = eval_expr(filter, item_args, env)?;
+                        if key_results.len() != 1 || key_results[0].args.len() != 1 {
+                            bail!("group_by filter must produce exactly one value per element");
+                        }
+                        let key = key_results.into_iter().next().unwrap().args.into_iter().next().unwrap();
+                        if let Some((_, group)) = groups.iter_mut().find(|(k, _)| k == &key) {
+                            group.push(item);
+                        } else {
+                            groups.push((key, vec![item]));
+                        }
+                    }
+                    let result: Vec<IDLValue> = groups
+                        .into_iter()
+                        .map(|(_, group)| IDLValue::Vec(group))
+                        .collect();
+                    Ok(vec![IDLArgs::new(&[IDLValue::Vec(result)])])
+                }
+                other => bail!("group_by requires a vec, got {}", type_name(&other)),
+            }
+        }
+
+        Expr::Unique => {
+            let val = require_single_val(&args, "unique")?;
+            match val {
+                IDLValue::Vec(items) => {
+                    let mut seen: Vec<IDLValue> = Vec::new();
+                    let result: Vec<IDLValue> = items
+                        .into_iter()
+                        .filter(|item| {
+                            if seen.iter().any(|s| s == item) {
+                                false
+                            } else {
+                                seen.push(item.clone());
+                                true
+                            }
+                        })
+                        .collect();
+                    Ok(vec![IDLArgs::new(&[IDLValue::Vec(result)])])
+                }
+                other => bail!("unique requires a vec, got {}", type_name(&other)),
+            }
+        }
+    }
+}
+
+fn cmp_idl_values(a: &IDLValue, b: &IDLValue) -> Result<std::cmp::Ordering> {
+    match (a, b) {
+        (IDLValue::Null | IDLValue::None, IDLValue::Null | IDLValue::None) => {
+            Ok(std::cmp::Ordering::Equal)
+        }
+        (IDLValue::Bool(a), IDLValue::Bool(b)) => Ok(a.cmp(b)),
+        (IDLValue::Text(a), IDLValue::Text(b)) => Ok(a.cmp(b)),
+        (IDLValue::Principal(a), IDLValue::Principal(b)) => {
+            Ok(a.to_text().cmp(&b.to_text()))
+        }
+        _ => {
+            let na = to_num(a).map_err(|_| {
+                anyhow::anyhow!(
+                    "cannot compare {} and {}: incompatible types for sort",
+                    type_name(a),
+                    type_name(b)
+                )
+            })?;
+            let nb = to_num(b).map_err(|_| {
+                anyhow::anyhow!(
+                    "cannot compare {} and {}: incompatible types for sort",
+                    type_name(a),
+                    type_name(b)
+                )
+            })?;
+            match (na, nb) {
+                (Num::Float(fa), Num::Float(fb)) => {
+                    Ok(fa.partial_cmp(&fb).unwrap_or(std::cmp::Ordering::Equal))
+                }
+                (Num::Float(_), _) | (_, Num::Float(_)) => bail!(
+                    "cannot mix float and integer in sort; use to_float or to_int"
+                ),
+                (a, b) => {
+                    let ai = num_to_bigint(a);
+                    let bi = num_to_bigint(b);
+                    Ok(ai.cmp(&bi))
+                }
             }
         }
     }

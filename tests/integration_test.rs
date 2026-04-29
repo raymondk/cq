@@ -1941,3 +1941,171 @@ fn principal_inequality() {
         .success()
         .stdout("(true)\n");
 }
+
+// --- Slice 12: analysis builtins (sort, sort_by, group_by, unique) ---
+
+#[test]
+fn sort_nat_vec() {
+    cq()
+        .args(["sort"])
+        .write_stdin("(vec { 3 : nat; 1 : nat; 2 : nat })")
+        .assert()
+        .success()
+        .stdout("(vec { 1 : nat; 2 : nat; 3 : nat })\n");
+}
+
+#[test]
+fn sort_text_vec() {
+    cq()
+        .args(["sort"])
+        .write_stdin("(vec { \"banana\"; \"apple\"; \"cherry\" })")
+        .assert()
+        .success()
+        .stdout("(vec { \"apple\"; \"banana\"; \"cherry\" })\n");
+}
+
+#[test]
+fn sort_empty_vec() {
+    cq()
+        .args(["sort"])
+        .write_stdin("(vec {})")
+        .assert()
+        .success()
+        .stdout("(vec {})\n");
+}
+
+#[test]
+fn sort_already_sorted() {
+    cq()
+        .args(["sort"])
+        .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(vec { 1 : nat; 2 : nat; 3 : nat })\n");
+}
+
+#[test]
+fn sort_mixed_types_errors() {
+    cq()
+        .args(["sort"])
+        .write_stdin("(vec { 1 : nat; \"text\" })")
+        .assert()
+        .failure()
+        .stderr(contains("incompatible types"));
+}
+
+#[test]
+fn sort_by_field() {
+    cq()
+        .args(["sort_by(.age)"])
+        .write_stdin(
+            "(vec { record { name = \"bob\"; age = 30 : nat }; record { name = \"alice\"; age = 25 : nat } })",
+        )
+        .assert()
+        .success()
+        .stdout(
+            "(\n  vec {\n    record { age = 25 : nat; name = \"alice\" };\n    record { age = 30 : nat; name = \"bob\" };\n  },\n)\n",
+        );
+}
+
+#[test]
+fn sort_by_text_field() {
+    cq()
+        .args(["sort_by(.name)"])
+        .write_stdin(
+            "(vec { record { name = \"charlie\" }; record { name = \"alice\" }; record { name = \"bob\" } })",
+        )
+        .assert()
+        .success()
+        .stdout(
+            "(\n  vec {\n    record { name = \"alice\" };\n    record { name = \"bob\" };\n    record { name = \"charlie\" };\n  },\n)\n",
+        );
+}
+
+#[test]
+fn sort_by_empty_vec() {
+    cq()
+        .args(["sort_by(.x)"])
+        .write_stdin("(vec {})")
+        .assert()
+        .success()
+        .stdout("(vec {})\n");
+}
+
+#[test]
+fn group_by_tag() {
+    cq()
+        .args(["group_by(tag(.))"])
+        .write_stdin(
+            "(vec { variant { Ok = 1 : nat }; variant { Err = \"bad\" }; variant { Ok = 2 : nat } })",
+        )
+        .assert()
+        .success()
+        .stdout(
+            "(\n  vec {\n    vec { variant { Ok = 1 : nat }; variant { Ok = 2 : nat } };\n    vec { variant { Err = \"bad\" } };\n  },\n)\n",
+        );
+}
+
+#[test]
+fn group_by_field() {
+    cq()
+        .args(["group_by(.kind)"])
+        .write_stdin(
+            "(vec { record { kind = \"a\" }; record { kind = \"b\" }; record { kind = \"a\" } })",
+        )
+        .assert()
+        .success()
+        .stdout(
+            "(\n  vec {\n    vec { record { kind = \"a\" }; record { kind = \"a\" } };\n    vec { record { kind = \"b\" } };\n  },\n)\n",
+        );
+}
+
+#[test]
+fn group_by_empty_vec() {
+    cq()
+        .args(["group_by(.x)"])
+        .write_stdin("(vec {})")
+        .assert()
+        .success()
+        .stdout("(vec {})\n");
+}
+
+#[test]
+fn unique_deduplicates() {
+    cq()
+        .args(["unique"])
+        .write_stdin("(vec { 1 : nat; 2 : nat; 1 : nat; 3 : nat; 2 : nat })")
+        .assert()
+        .success()
+        .stdout("(vec { 1 : nat; 2 : nat; 3 : nat })\n");
+}
+
+#[test]
+fn unique_preserves_first_occurrence_order() {
+    cq()
+        .args(["unique"])
+        .write_stdin("(vec { \"c\"; \"a\"; \"b\"; \"a\"; \"c\" })")
+        .assert()
+        .success()
+        .stdout("(vec { \"c\"; \"a\"; \"b\" })\n");
+}
+
+#[test]
+fn unique_empty_vec() {
+    cq()
+        .args(["unique"])
+        .write_stdin("(vec {})")
+        .assert()
+        .success()
+        .stdout("(vec {})\n");
+}
+
+#[test]
+fn unique_no_duplicates() {
+    cq()
+        .args(["unique"])
+        .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(vec { 1 : nat; 2 : nat; 3 : nat })\n");
+}
