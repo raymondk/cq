@@ -3,6 +3,7 @@ use candid::types::Label;
 use candid::types::value::{IDLField, VariantValue};
 use candid::{IDLArgs, IDLValue};
 use num_bigint::{BigInt, BigUint};
+use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
 // AST
@@ -62,6 +63,11 @@ enum MatchArm {
     Default,
 }
 
+enum StrPart {
+    Lit(String),
+    Expr(Box<Expr>),
+}
+
 enum Expr {
     Identity,
     /// `.foo` / `.Tag` with an opt mode flag
@@ -108,6 +114,14 @@ enum Expr {
     Match(Vec<(MatchArm, Box<Expr>)>),
     /// `tag(expr)` — returns the active variant tag as text
     Tag(Box<Expr>),
+    /// `if cond then a [elif cond then b]* else c end`
+    If(Vec<(Box<Expr>, Box<Expr>)>, Option<Box<Expr>>),
+    /// `expr as $x | body` — bind expr's value to $x, evaluate body with same input
+    VarBind(String, Box<Expr>, Box<Expr>),
+    /// `$x` — variable reference
+    VarRef(String),
+    /// `"text \(expr) more"` — string interpolation
+    StrInterp(Vec<StrPart>),
 }
 
 // ---------------------------------------------------------------------------
@@ -123,9 +137,40 @@ fn parse(s: &str) -> Result<Expr> {
 }
 
 // pipe has lowest precedence: ascribe | ascribe | ...
+// Also handles: ascribe as $x | pipe
 fn parse_pipe(s: &str) -> Result<(Expr, &str)> {
     let (left, rest) = parse_ascribe(s)?;
     let rest = rest.trim_start();
+
+    // Check for 'as $x | body' before plain pipe
+    if let Some(after_as) = rest.strip_prefix("as") {
+        if after_as
+            .chars()
+            .next()
+            .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+        {
+            let after_as = after_as.trim_start();
+            if let Some(after_dollar) = after_as.strip_prefix('$') {
+                let ident_end = after_dollar
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(after_dollar.len());
+                if ident_end > 0 {
+                    let name = after_dollar[..ident_end].to_string();
+                    let after_name = after_dollar[ident_end..].trim_start();
+                    if let Some(after_pipe) = after_name.strip_prefix('|') {
+                        if !after_pipe.starts_with('/') {
+                            let (body, rest2) = parse_pipe(after_pipe.trim_start())?;
+                            return Ok((
+                                Expr::VarBind(name, Box::new(left), Box::new(body)),
+                                rest2,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if let Some(after) = rest.strip_prefix('|') {
         // Don't consume '//' as a pipe '|'
         if after.starts_with('/') {
@@ -325,7 +370,13 @@ fn parse_mul(s: &str) -> Result<(Expr, &str)> {
     Ok((left, rest))
 }
 
-// atom: literals | select | some | none | principal | blob | variant | record | vec | dotchain
+fn keyword_boundary(s: &str) -> bool {
+    s.chars()
+        .next()
+        .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+}
+
+// atom: literals | if | $x | select | some | none | principal | blob | variant | record | vec | dotchain
 fn parse_atom(s: &str) -> Result<(Expr, &str)> {
     let s = s.trim_start();
 
@@ -339,22 +390,32 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
         return Ok((inner, rest));
     }
 
+    // `if cond then a [elif cond then b]* else c end`
+    if let Some(after) = s.strip_prefix("if") {
+        if keyword_boundary(after) {
+            return parse_if(after.trim_start());
+        }
+    }
+
+    // `$x` — variable reference
+    if let Some(after) = s.strip_prefix('$') {
+        let ident_end = after
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .unwrap_or(after.len());
+        if ident_end > 0 {
+            let name = after[..ident_end].to_string();
+            return Ok((Expr::VarRef(name), &after[ident_end..]));
+        }
+    }
+
     // `true` / `false` boolean literals
     if let Some(after) = s.strip_prefix("true") {
-        if after
-            .chars()
-            .next()
-            .map_or(true, |c| !c.is_alphanumeric() && c != '_')
-        {
+        if keyword_boundary(after) {
             return Ok((Expr::Literal(IDLValue::Bool(true)), after));
         }
     }
     if let Some(after) = s.strip_prefix("false") {
-        if after
-            .chars()
-            .next()
-            .map_or(true, |c| !c.is_alphanumeric() && c != '_')
-        {
+        if keyword_boundary(after) {
             return Ok((Expr::Literal(IDLValue::Bool(false)), after));
         }
     }
@@ -369,12 +430,20 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
         return Ok((Expr::Literal(IDLValue::Number(num_str.to_string())), rest));
     }
 
-    // String literal `"..."` → IDLValue::Text
+    // String literal with optional interpolation `"..."` or `"text \(expr) more"`
     if s.starts_with('"') {
-        let (bytes, rest) = parse_quoted_bytes(s)?;
-        let text = String::from_utf8(bytes)
-            .map_err(|_| anyhow::anyhow!("string literal must be valid UTF-8"))?;
-        return Ok((Expr::Literal(IDLValue::Text(text)), rest));
+        let (parts, rest) = parse_interp_string(s)?;
+        if parts.iter().all(|p| matches!(p, StrPart::Lit(_))) {
+            let text: String = parts
+                .into_iter()
+                .map(|p| match p {
+                    StrPart::Lit(s) => s,
+                    StrPart::Expr(_) => unreachable!(),
+                })
+                .collect();
+            return Ok((Expr::Literal(IDLValue::Text(text)), rest));
+        }
+        return Ok((Expr::StrInterp(parts), rest));
     }
 
     // `select(pipe)`
@@ -389,11 +458,7 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
 
     // `none` keyword (not followed by alphanumeric or '_')
     if let Some(after) = s.strip_prefix("none") {
-        if after
-            .chars()
-            .next()
-            .map_or(true, |c| !c.is_alphanumeric() && c != '_')
-        {
+        if keyword_boundary(after) {
             return Ok((Expr::None_, after));
         }
     }
@@ -440,11 +505,7 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
 
     // `match { Tag1 = body1; Tag2 = body2; _ = default }` — variant dispatch
     if let Some(after) = s.strip_prefix("match") {
-        if after
-            .chars()
-            .next()
-            .map_or(true, |c| !c.is_alphanumeric() && c != '_')
-        {
+        if keyword_boundary(after) {
             let after = after.trim_start();
             if after.starts_with('{') {
                 let (arms, rest) = parse_match_arms(&after[1..])?;
@@ -486,6 +547,66 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
 
     // fallthrough to dotchain
     parse_dotchain(s)
+}
+
+// Parse `if cond then body [elif cond then body]* else body end` — caller consumed 'if'
+fn parse_if(s: &str) -> Result<(Expr, &str)> {
+    let mut branches: Vec<(Box<Expr>, Box<Expr>)> = Vec::new();
+    let mut rest = s;
+
+    // Parse first condition
+    let (cond, r) = parse_pipe(rest)?;
+    rest = r.trim_start();
+    rest = expect_keyword(rest, "then", "expected 'then' after if condition")?;
+    let (then_body, r) = parse_pipe(rest.trim_start())?;
+    rest = r;
+    branches.push((Box::new(cond), Box::new(then_body)));
+
+    // Parse elif chains
+    loop {
+        let r = rest.trim_start();
+        if let Some(after_elif) = r.strip_prefix("elif") {
+            if keyword_boundary(after_elif) {
+                let (cond, r2) = parse_pipe(after_elif.trim_start())?;
+                let r2 = r2.trim_start();
+                let r2 = expect_keyword(r2, "then", "expected 'then' after elif condition")?;
+                let (then_body, r3) = parse_pipe(r2.trim_start())?;
+                branches.push((Box::new(cond), Box::new(then_body)));
+                rest = r3;
+                continue;
+            }
+        }
+        break;
+    }
+
+    // Parse else branch (required)
+    rest = rest.trim_start();
+    let else_branch = if let Some(after_else) = rest.strip_prefix("else") {
+        if keyword_boundary(after_else) {
+            let (else_body, r) = parse_pipe(after_else.trim_start())?;
+            rest = r;
+            Some(Box::new(else_body))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    rest = rest.trim_start();
+    rest = expect_keyword(rest, "end", "expected 'end' to close if expression")?;
+
+    Ok((Expr::If(branches, else_branch), rest))
+}
+
+/// Consume a keyword at the start of `s`, returning the remaining string.
+fn expect_keyword<'a>(s: &'a str, kw: &str, msg: &str) -> Result<&'a str> {
+    if let Some(after) = s.strip_prefix(kw) {
+        if keyword_boundary(after) {
+            return Ok(after);
+        }
+    }
+    bail!("{msg}")
 }
 
 // dotchain: .foo? .bar! .[0] etc. (chained via chain_tail)
@@ -713,7 +834,89 @@ fn parse_match_arms(s: &str) -> Result<(Vec<(MatchArm, Box<Expr>)>, &str)> {
     }
 }
 
-// Parse a double-quoted string, returning raw bytes (handles \n \t \r \" \\ \XX hex escapes)
+// Parse a double-quoted string with optional \(expr) interpolation segments.
+// Returns a Vec<StrPart> where each part is a literal or an expression.
+fn parse_interp_string(s: &str) -> Result<(Vec<StrPart>, &str)> {
+    let mut remaining = s
+        .strip_prefix('"')
+        .ok_or_else(|| anyhow::anyhow!("expected '\"'"))?;
+    let mut parts: Vec<StrPart> = Vec::new();
+    let mut lit = String::new();
+
+    loop {
+        if remaining.is_empty() {
+            bail!("unterminated string literal");
+        }
+        match remaining.as_bytes()[0] {
+            b'"' => {
+                if !lit.is_empty() {
+                    parts.push(StrPart::Lit(std::mem::take(&mut lit)));
+                }
+                return Ok((parts, &remaining[1..]));
+            }
+            b'\\' => {
+                if remaining.len() < 2 {
+                    bail!("unterminated escape in string literal");
+                }
+                let esc = remaining.as_bytes()[1];
+                if esc == b'(' {
+                    // String interpolation: \(expr)
+                    if !lit.is_empty() {
+                        parts.push(StrPart::Lit(std::mem::take(&mut lit)));
+                    }
+                    let (expr, rest) = parse_pipe(&remaining[2..])?;
+                    let rest = rest.trim_start();
+                    let rest = rest.strip_prefix(')').ok_or_else(|| {
+                        anyhow::anyhow!("expected ')' to close \\(...) in string interpolation")
+                    })?;
+                    parts.push(StrPart::Expr(Box::new(expr)));
+                    remaining = rest;
+                } else {
+                    match esc {
+                        b'n' => {
+                            lit.push('\n');
+                            remaining = &remaining[2..];
+                        }
+                        b't' => {
+                            lit.push('\t');
+                            remaining = &remaining[2..];
+                        }
+                        b'r' => {
+                            lit.push('\r');
+                            remaining = &remaining[2..];
+                        }
+                        b'"' => {
+                            lit.push('"');
+                            remaining = &remaining[2..];
+                        }
+                        b'\\' => {
+                            lit.push('\\');
+                            remaining = &remaining[2..];
+                        }
+                        hi @ (b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F') => {
+                            if remaining.len() < 3 {
+                                bail!("incomplete hex escape in string literal");
+                            }
+                            let lo = remaining.as_bytes()[2];
+                            let byte_val = hex_nibble(hi)? << 4 | hex_nibble(lo)?;
+                            lit.push(byte_val as char);
+                            remaining = &remaining[3..];
+                        }
+                        other => bail!("unknown string escape '\\{}'", other as char),
+                    }
+                }
+            }
+            _ => {
+                let ch = remaining.chars().next().unwrap();
+                lit.push(ch);
+                remaining = &remaining[ch.len_utf8()..];
+            }
+        }
+    }
+}
+
+// Parse a double-quoted string returning raw bytes (no interpolation support).
+// Used for `blob "..."` and `principal "..."` where raw bytes are needed.
 fn parse_quoted_bytes(s: &str) -> Result<(Vec<u8>, &str)> {
     let s = s
         .strip_prefix('"')
@@ -937,10 +1140,14 @@ pub fn evaluate(args: IDLArgs, expr: Option<&str>) -> Result<Vec<IDLArgs>> {
         return Ok(vec![args]);
     }
     let query = parse(expr_str)?;
-    eval_expr(&query, args)
+    eval_expr(&query, args, &HashMap::new())
 }
 
-fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
+fn eval_expr(
+    expr: &Expr,
+    args: IDLArgs,
+    env: &HashMap<String, IDLValue>,
+) -> Result<Vec<IDLArgs>> {
     match expr {
         Expr::Identity => Ok(vec![args]),
         Expr::Field(name, mode) => {
@@ -958,8 +1165,8 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
         Expr::Iter => extract_iter(&args),
         Expr::Pipe(left, right) => {
             let mut results = Vec::new();
-            for item in eval_expr(left, args)? {
-                results.extend(eval_expr(right, item)?);
+            for item in eval_expr(left, args, env)? {
+                results.extend(eval_expr(right, item, env)?);
             }
             Ok(results)
         }
@@ -974,19 +1181,19 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
             }
         }
         Expr::Alt(left, right) => {
-            let results = eval_expr(left, args.clone())?;
+            let results = eval_expr(left, args.clone(), env)?;
             let unwrapped: Vec<IDLArgs> = results
                 .into_iter()
                 .filter_map(unwrap_opt_filter)
                 .collect();
             if unwrapped.is_empty() {
-                eval_expr(right, args)
+                eval_expr(right, args, env)
             } else {
                 Ok(unwrapped)
             }
         }
         Expr::SomeOf(inner) => {
-            let results = eval_expr(inner, args)?;
+            let results = eval_expr(inner, args, env)?;
             results
                 .into_iter()
                 .map(|r| {
@@ -1002,7 +1209,7 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
         Expr::MakeRecord(fields) => {
             let mut idl_fields = Vec::new();
             for (name, field_expr) in fields {
-                let mut results = eval_expr(field_expr, args.clone())?;
+                let mut results = eval_expr(field_expr, args.clone(), env)?;
                 if results.len() != 1 || results[0].args.len() != 1 {
                     bail!(
                         "record field '{name}' must produce exactly one value, got {}",
@@ -1021,7 +1228,7 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
         Expr::MakeVec(elems) => {
             let mut items = Vec::new();
             for (i, elem_expr) in elems.iter().enumerate() {
-                let mut results = eval_expr(elem_expr, args.clone())?;
+                let mut results = eval_expr(elem_expr, args.clone(), env)?;
                 if results.len() != 1 || results[0].args.len() != 1 {
                     bail!(
                         "vec element {i} must produce exactly one value, got {}",
@@ -1035,7 +1242,7 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
 
         Expr::MakeVariant(name, payload_expr) => {
             let payload = if let Some(expr) = payload_expr {
-                let mut results = eval_expr(expr, args)?;
+                let mut results = eval_expr(expr, args, env)?;
                 if results.len() != 1 || results[0].args.len() != 1 {
                     bail!("variant payload must produce exactly one value");
                 }
@@ -1062,7 +1269,7 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
         Expr::MakeBlob(bytes) => Ok(vec![IDLArgs::new(&[IDLValue::Blob(bytes.clone())])]),
 
         Expr::BlobHex(inner) => {
-            let mut results = eval_expr(inner, args)?;
+            let mut results = eval_expr(inner, args, env)?;
             if results.len() != 1 || results[0].args.len() != 1 {
                 bail!("blob_hex() requires exactly one text value");
             }
@@ -1081,7 +1288,7 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
         }
 
         Expr::Ascribe(inner, target) => {
-            let results = eval_expr(inner, args)?;
+            let results = eval_expr(inner, args, env)?;
             results
                 .into_iter()
                 .map(|r| {
@@ -1097,11 +1304,11 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
         Expr::Literal(v) => Ok(vec![IDLArgs::new(&[v.clone()])]),
 
         Expr::BinArith(op, left, right) => {
-            let l_results = eval_expr(left, args.clone())?;
+            let l_results = eval_expr(left, args.clone(), env)?;
             if l_results.len() != 1 || l_results[0].args.len() != 1 {
                 bail!("arithmetic requires a single value on the left side");
             }
-            let r_results = eval_expr(right, args)?;
+            let r_results = eval_expr(right, args, env)?;
             if r_results.len() != 1 || r_results[0].args.len() != 1 {
                 bail!("arithmetic requires a single value on the right side");
             }
@@ -1112,11 +1319,11 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
         }
 
         Expr::BinCmp(op, left, right) => {
-            let l_results = eval_expr(left, args.clone())?;
+            let l_results = eval_expr(left, args.clone(), env)?;
             if l_results.len() != 1 || l_results[0].args.len() != 1 {
                 bail!("comparison requires a single value on the left side");
             }
-            let r_results = eval_expr(right, args)?;
+            let r_results = eval_expr(right, args, env)?;
             if r_results.len() != 1 || r_results[0].args.len() != 1 {
                 bail!("comparison requires a single value on the right side");
             }
@@ -1140,8 +1347,8 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
         }
 
         Expr::BinBool(op, left, right) => {
-            let lb = eval_single_bool(left, args.clone())?;
-            let rb = eval_single_bool(right, args)?;
+            let lb = eval_single_bool(left, args.clone(), env)?;
+            let rb = eval_single_bool(right, args, env)?;
             let result = match op {
                 BoolOp::And => lb && rb,
                 BoolOp::Or => lb || rb,
@@ -1150,12 +1357,12 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
         }
 
         Expr::Not(inner) => {
-            let b = eval_single_bool(inner, args)?;
+            let b = eval_single_bool(inner, args, env)?;
             Ok(vec![IDLArgs::new(&[IDLValue::Bool(!b)])])
         }
 
         Expr::Select(pred) => {
-            let pred_result = eval_expr(pred, args.clone())?;
+            let pred_result = eval_expr(pred, args.clone(), env)?;
             if pred_result.is_empty() {
                 return Ok(vec![]);
             }
@@ -1194,7 +1401,7 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
                     MatchArm::Default => true,
                 };
                 if matches {
-                    return eval_expr(body, IDLArgs::new(&[payload]));
+                    return eval_expr(body, IDLArgs::new(&[payload]), env);
                 }
             }
             bail!(
@@ -1203,7 +1410,7 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
         }
 
         Expr::Tag(inner) => {
-            let results = eval_expr(inner, args)?;
+            let results = eval_expr(inner, args, env)?;
             if results.len() != 1 || results[0].args.len() != 1 {
                 bail!("tag() requires a single value");
             }
@@ -1218,17 +1425,112 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
                 ),
             }
         }
+
+        Expr::If(branches, else_branch) => {
+            for (cond, then_body) in branches {
+                let cond_result = eval_expr(cond, args.clone(), env)?;
+                if cond_result.len() != 1 || cond_result[0].args.len() != 1 {
+                    bail!("if condition must produce a single boolean value");
+                }
+                match &cond_result[0].args[0] {
+                    IDLValue::Bool(true) => return eval_expr(then_body, args, env),
+                    IDLValue::Bool(false) => continue,
+                    other => bail!(
+                        "if condition must be a bool, got {}",
+                        type_name(other)
+                    ),
+                }
+            }
+            if let Some(else_body) = else_branch {
+                eval_expr(else_body, args, env)
+            } else {
+                Ok(vec![])
+            }
+        }
+
+        Expr::VarBind(name, bound_expr, body) => {
+            let bound_results = eval_expr(bound_expr, args.clone(), env)?;
+            let mut results = Vec::new();
+            for r in bound_results {
+                if r.args.len() != 1 {
+                    bail!(
+                        "'as ${name}' binding requires exactly one value, got {}",
+                        r.args.len()
+                    );
+                }
+                let mut new_env = env.clone();
+                new_env.insert(name.clone(), r.args[0].clone());
+                results.extend(eval_expr(body, args.clone(), &new_env)?);
+            }
+            Ok(results)
+        }
+
+        Expr::VarRef(name) => {
+            let val = env
+                .get(name)
+                .ok_or_else(|| anyhow::anyhow!("undefined variable ${name}"))?;
+            Ok(vec![IDLArgs::new(&[val.clone()])])
+        }
+
+        Expr::StrInterp(parts) => {
+            let mut result = String::new();
+            for part in parts {
+                match part {
+                    StrPart::Lit(s) => result.push_str(s),
+                    StrPart::Expr(e) => {
+                        let vals = eval_expr(e, args.clone(), env)?;
+                        if vals.len() != 1 || vals[0].args.len() != 1 {
+                            bail!(
+                                "string interpolation \\(...) must produce exactly one value, got {}",
+                                vals.len()
+                            );
+                        }
+                        result.push_str(&idl_to_text(&vals[0].args[0]));
+                    }
+                }
+            }
+            Ok(vec![IDLArgs::new(&[IDLValue::Text(result)])])
+        }
     }
 }
 
-fn eval_single_bool(expr: &Expr, args: IDLArgs) -> Result<bool> {
-    let results = eval_expr(expr, args)?;
+fn eval_single_bool(
+    expr: &Expr,
+    args: IDLArgs,
+    env: &HashMap<String, IDLValue>,
+) -> Result<bool> {
+    let results = eval_expr(expr, args, env)?;
     if results.len() != 1 || results[0].args.len() != 1 {
         bail!("boolean operation requires a single boolean value");
     }
     match &results[0].args[0] {
         IDLValue::Bool(b) => Ok(*b),
         other => bail!("expected bool, got {}", type_name(other)),
+    }
+}
+
+/// Convert an IDLValue to a plain text string (for string interpolation).
+/// Text values are returned as-is; numeric values give their numeric string;
+/// other values use their Candid text representation.
+fn idl_to_text(val: &IDLValue) -> String {
+    match val {
+        IDLValue::Text(s) => s.clone(),
+        IDLValue::Bool(b) => b.to_string(),
+        IDLValue::Nat(n) => n.to_string(),
+        IDLValue::Int(n) => n.to_string(),
+        IDLValue::Number(s) => s.clone(),
+        IDLValue::Nat8(n) => n.to_string(),
+        IDLValue::Nat16(n) => n.to_string(),
+        IDLValue::Nat32(n) => n.to_string(),
+        IDLValue::Nat64(n) => n.to_string(),
+        IDLValue::Int8(n) => n.to_string(),
+        IDLValue::Int16(n) => n.to_string(),
+        IDLValue::Int32(n) => n.to_string(),
+        IDLValue::Int64(n) => n.to_string(),
+        IDLValue::Float32(f) => f.to_string(),
+        IDLValue::Float64(f) => f.to_string(),
+        IDLValue::Null | IDLValue::None => "null".to_string(),
+        other => format!("{other}"),
     }
 }
 

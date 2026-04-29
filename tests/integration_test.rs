@@ -1457,3 +1457,155 @@ fn match_body_expression_uses_payload() {
         .success()
         .stdout("(20 : nat)\n");
 }
+
+// --- Slice 10: if/elif/else, as $x, string interpolation ---
+
+#[test]
+fn if_true_branch() {
+    cq()
+        .args(["if .x then \"yes\" else \"no\" end"])
+        .write_stdin("(record { x = true })")
+        .assert()
+        .success()
+        .stdout("(\"yes\")\n");
+}
+
+#[test]
+fn if_false_branch() {
+    cq()
+        .args(["if .x then \"yes\" else \"no\" end"])
+        .write_stdin("(record { x = false })")
+        .assert()
+        .success()
+        .stdout("(\"no\")\n");
+}
+
+#[test]
+fn if_elif_else() {
+    cq()
+        .args(["if .x == 1 then \"one\" elif .x == 2 then \"two\" else \"other\" end"])
+        .write_stdin("(record { x = 2 : nat })")
+        .assert()
+        .success()
+        .stdout("(\"two\")\n");
+}
+
+#[test]
+fn if_elif_else_default() {
+    cq()
+        .args(["if .x == 1 then \"one\" elif .x == 2 then \"two\" else \"other\" end"])
+        .write_stdin("(record { x = 99 : nat })")
+        .assert()
+        .success()
+        .stdout("(\"other\")\n");
+}
+
+#[test]
+fn if_condition_not_bool_errors() {
+    cq()
+        .args(["if . then \"yes\" else \"no\" end"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .failure()
+        .stderr(contains("bool"));
+}
+
+#[test]
+fn if_without_else_no_match_returns_empty() {
+    cq()
+        .args(["if .x then \"yes\" end"])
+        .write_stdin("(record { x = false })")
+        .assert()
+        .success()
+        .stdout("");
+}
+
+#[test]
+fn var_bind_basic() {
+    cq()
+        .args([".foo as $x | {result: $x}"])
+        .write_stdin("(record { foo = 42 : nat })")
+        .assert()
+        .success()
+        .stdout("(record { result = 42 : nat })\n");
+}
+
+#[test]
+fn var_bind_multiple() {
+    cq()
+        .args([".a as $a | .b as $b | $a + $b"])
+        .write_stdin("(record { a = 10 : nat; b = 20 : nat })")
+        .assert()
+        .success()
+        .stdout("(30 : nat)\n");
+}
+
+#[test]
+fn var_bind_in_condition() {
+    cq()
+        .args([".val as $v | if $v == 1 then \"one\" else \"other\" end"])
+        .write_stdin("(record { val = 1 : nat })")
+        .assert()
+        .success()
+        .stdout("(\"one\")\n");
+}
+
+#[test]
+fn var_ref_undefined_errors() {
+    cq()
+        .args(["$undefined"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .failure()
+        .stderr(contains("undefined variable"));
+}
+
+#[test]
+fn string_interp_text_field() {
+    cq()
+        .args(["\"hello \\(.name)\""])
+        .write_stdin("(record { name = \"world\" })")
+        .assert()
+        .success()
+        .stdout("(\"hello world\")\n");
+}
+
+#[test]
+fn string_interp_nat_field() {
+    cq()
+        .args(["\"count: \\(.n)\""])
+        .write_stdin("(record { n = 42 : nat })")
+        .assert()
+        .success()
+        .stdout("(\"count: 42\")\n");
+}
+
+#[test]
+fn string_interp_prefix_and_suffix() {
+    cq()
+        .args(["\"[\\(.x)]\""])
+        .write_stdin("(record { x = 7 : nat })")
+        .assert()
+        .success()
+        .stdout("(\"[7]\")\n");
+}
+
+#[test]
+fn string_interp_nested() {
+    cq()
+        .args(["\"outer \\(\"inner \\(.v)\")\""])
+        .write_stdin("(record { v = 1 : nat })")
+        .assert()
+        .success()
+        .stdout("(\"outer inner 1\")\n");
+}
+
+#[test]
+fn string_interp_var() {
+    cq()
+        .args([".x as $v | \"val=\\($v)\""])
+        .write_stdin("(record { x = 5 : nat })")
+        .assert()
+        .success()
+        .stdout("(\"val=5\")\n");
+}
