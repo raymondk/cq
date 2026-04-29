@@ -2,7 +2,7 @@ use anyhow::Result;
 use candid::IDLArgs;
 
 pub enum OutputFormat {
-    Candid,
+    Text, // also accepts "candid" as alias
     Hex,
     Bin,
 }
@@ -10,17 +10,19 @@ pub enum OutputFormat {
 impl OutputFormat {
     pub fn from_str(s: &str) -> Result<Self> {
         match s {
-            "candid" => Ok(OutputFormat::Candid),
+            "text" | "candid" => Ok(OutputFormat::Text),
             "hex" => Ok(OutputFormat::Hex),
             "bin" => Ok(OutputFormat::Bin),
-            other => anyhow::bail!("unknown output format: {other}; expected candid, hex, or bin"),
+            other => anyhow::bail!(
+                "unknown output format: {other}; expected text (or candid), hex, or bin"
+            ),
         }
     }
 }
 
 pub fn emit<W: std::io::Write>(w: &mut W, args: &IDLArgs, format: &OutputFormat) -> Result<()> {
     match format {
-        OutputFormat::Candid => {
+        OutputFormat::Text => {
             writeln!(w, "{args}")?;
         }
         OutputFormat::Hex => {
