@@ -343,6 +343,121 @@ fn roundtrip_bin_to_bin() {
         .stdout(bin_for_nat42());
 }
 
+// --- Slice 3: field access and pipe ---
+
+#[test]
+fn field_access_simple() {
+    cq()
+        .args([".foo"])
+        .write_stdin("(record { foo = 42 : nat })")
+        .assert()
+        .success()
+        .stdout("(42 : nat)\n");
+}
+
+#[test]
+fn field_access_chained() {
+    cq()
+        .args([".foo.bar"])
+        .write_stdin("(record { foo = record { bar = 7 : nat } })")
+        .assert()
+        .success()
+        .stdout("(7 : nat)\n");
+}
+
+#[test]
+fn field_access_three_levels() {
+    cq()
+        .args([".a.b.c"])
+        .write_stdin("(record { a = record { b = record { c = 99 : nat } } })")
+        .assert()
+        .success()
+        .stdout("(99 : nat)\n");
+}
+
+#[test]
+fn pipe_field_access() {
+    cq()
+        .args([".foo | .bar"])
+        .write_stdin("(record { foo = record { bar = 3 : nat } })")
+        .assert()
+        .success()
+        .stdout("(3 : nat)\n");
+}
+
+#[test]
+fn pipe_identity_passthrough() {
+    cq()
+        .args([". | .foo"])
+        .write_stdin("(record { foo = 5 : nat })")
+        .assert()
+        .success()
+        .stdout("(5 : nat)\n");
+}
+
+#[test]
+fn identity_explicit_dot() {
+    cq()
+        .args(["."])
+        .write_stdin("(record { foo = 1 : nat })")
+        .assert()
+        .success()
+        .stdout("(record { foo = 1 : nat })\n");
+}
+
+#[test]
+fn field_access_unknown_field_errors() {
+    cq()
+        .args([".missing"])
+        .write_stdin("(record { foo = 1 : nat })")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("unknown field 'missing'"))
+        .stderr(predicates::str::contains("foo"));
+}
+
+#[test]
+fn field_access_non_record_errors() {
+    cq()
+        .args([".foo"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("field access '.foo' requires a record"));
+}
+
+#[test]
+fn field_access_text_field() {
+    cq()
+        .args([".name"])
+        .write_stdin("(record { name = \"alice\" })")
+        .assert()
+        .success()
+        .stdout("(\"alice\")\n");
+}
+
+#[test]
+fn field_access_round_trip_pipe_cq() {
+    // cq '.foo' | cq '.' produces same bytes as cq '.foo' alone
+    let direct = cq()
+        .args([".foo"])
+        .write_stdin("(record { foo = 1 : nat })")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let piped = cq()
+        .args(["."])
+        .write_stdin(direct.as_slice())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(direct, piped);
+}
+
 // --- Legacy round-trip tests (kept for regression) ---
 
 #[test]
