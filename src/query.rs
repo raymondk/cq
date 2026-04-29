@@ -8,7 +8,8 @@ use candid::{IDLArgs, IDLValue};
 
 enum Expr {
     Identity,
-    Field(String),
+    /// `.foo` / `.Tag` — bool flag = optional (`.foo?` / `.Tag?`)
+    Field(String, bool),
     Index(usize),
     Slice(Option<usize>, Option<usize>),
     Iter,
@@ -53,15 +54,22 @@ fn parse_chain(s: &str) -> Result<(Expr, &str)> {
             .find(|c: char| !c.is_alphanumeric() && c != '_')
             .unwrap_or(after_dot.len());
         let (ident, rest) = after_dot.split_at(ident_end);
-        let atom = if ident.is_empty() {
-            Expr::Identity
+        if ident.is_empty() {
+            (Expr::Identity, rest)
         } else {
-            Expr::Field(ident.to_string())
-        };
-        (atom, rest)
+            let (optional, rest) = if rest.starts_with('?') {
+                (true, &rest[1..])
+            } else {
+                (false, rest)
+            };
+            (Expr::Field(ident.to_string(), optional), rest)
+        }
     };
 
-    // Chained dot: .foo.bar, .[0].foo, .foo.[0]
+    chain_tail(atom, rest)
+}
+
+fn chain_tail(atom: Expr, rest: &str) -> Result<(Expr, &str)> {
     let rest_trimmed = rest.trim_start();
     if rest_trimmed.starts_with('.')
         && rest_trimmed[1..]
@@ -135,9 +143,9 @@ pub fn evaluate(args: IDLArgs, expr: Option<&str>) -> Result<Vec<IDLArgs>> {
 fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
     match expr {
         Expr::Identity => Ok(vec![args]),
-        Expr::Field(name) => {
-            let val = extract_field(&args, name)?;
-            Ok(vec![IDLArgs::new(&[val])])
+        Expr::Field(name, optional) => {
+            let vals = extract_field(&args, name, *optional)?;
+            Ok(vals.into_iter().map(|v| IDLArgs::new(&[v])).collect())
         }
         Expr::Index(i) => {
             let val = extract_index(&args, *i)?;
@@ -158,7 +166,7 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
     }
 }
 
-fn extract_field(args: &IDLArgs, name: &str) -> Result<IDLValue> {
+fn extract_field(args: &IDLArgs, name: &str, optional: bool) -> Result<Vec<IDLValue>> {
     if args.args.len() != 1 {
         bail!(
             "field access '.{name}' requires a single value, got {} values",
@@ -170,8 +178,11 @@ fn extract_field(args: &IDLArgs, name: &str) -> Result<IDLValue> {
             let hash = candid::idl_hash(name);
             for field in fields {
                 if label_matches(&field.id, name, hash) {
-                    return Ok(field.val.clone());
+                    return Ok(vec![field.val.clone()]);
                 }
+            }
+            if optional {
+                return Ok(vec![]);
             }
             let available: Vec<String> = fields.iter().map(|f| label_display(&f.id)).collect();
             bail!(
@@ -179,8 +190,20 @@ fn extract_field(args: &IDLArgs, name: &str) -> Result<IDLValue> {
                 available.join(", ")
             );
         }
+        IDLValue::Variant(v) => {
+            let field = &v.0;
+            let hash = candid::idl_hash(name);
+            if label_matches(&field.id, name, hash) {
+                return Ok(vec![field.val.clone()]);
+            }
+            if optional {
+                return Ok(vec![]);
+            }
+            let active = label_display(&field.id);
+            bail!("tag mismatch: active tag is '{active}', tried to access '{name}'");
+        }
         other => bail!(
-            "field access '.{name}' requires a record, got {}",
+            "field access '.{name}' requires a record or variant, got {}",
             type_name(other)
         ),
     }

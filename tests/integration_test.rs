@@ -579,6 +579,111 @@ fn vec_field_then_index() {
         .stdout("(20 : nat)\n");
 }
 
+// --- Slice 5: variant arm access ---
+
+#[test]
+fn variant_tag_access_matching_arm() {
+    cq()
+        .args([".Ok"])
+        .write_stdin("(variant { Ok = \"hello\" })")
+        .assert()
+        .success()
+        .stdout("(\"hello\")\n");
+}
+
+#[test]
+fn variant_tag_access_wrong_arm_errors() {
+    cq()
+        .args([".Err"])
+        .write_stdin("(variant { Ok = \"hello\" })")
+        .assert()
+        .failure()
+        .stderr(contains("tag mismatch"))
+        .stderr(contains("Ok"))
+        .stderr(contains("Err"));
+}
+
+#[test]
+fn variant_null_payload_returns_null() {
+    cq()
+        .args([".Pending"])
+        .write_stdin("(variant { Pending })")
+        .assert()
+        .success()
+        .stdout("(null : null)\n");
+}
+
+#[test]
+fn variant_tag_optional_skip_on_mismatch() {
+    cq()
+        .args([".Err?"])
+        .write_stdin("(variant { Ok = \"hello\" })")
+        .assert()
+        .success()
+        .stdout("");
+}
+
+#[test]
+fn variant_tag_optional_returns_payload_on_match() {
+    cq()
+        .args([".Ok?"])
+        .write_stdin("(variant { Ok = \"hello\" })")
+        .assert()
+        .success()
+        .stdout("(\"hello\")\n");
+}
+
+#[test]
+fn variant_field_access_regression() {
+    // .Tag on a record still works like slice 3 field access
+    cq()
+        .args([".foo"])
+        .write_stdin("(record { foo = 42 : nat })")
+        .assert()
+        .success()
+        .stdout("(42 : nat)\n");
+}
+
+#[test]
+fn variant_chained_optional_extracts_nested_field() {
+    // .kind.Transfer?.amount — skips chain if tag doesn't match
+    cq()
+        .args([".kind.Transfer?.amount"])
+        .write_stdin("(record { kind = variant { Transfer = record { amount = 100 : nat } } })")
+        .assert()
+        .success()
+        .stdout("(100 : nat)\n");
+}
+
+#[test]
+fn variant_chained_optional_empty_on_mismatch() {
+    cq()
+        .args([".Transfer?.amount"])
+        .write_stdin("(variant { Pending })")
+        .assert()
+        .success()
+        .stdout("");
+}
+
+#[test]
+fn variant_round_trip_via_tag_access() {
+    let extracted = cq()
+        .args([".Ok"])
+        .write_stdin("(variant { Ok = \"world\" })")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    // piping extracted payload through cq identity is lossless
+    cq()
+        .args(["."])
+        .write_stdin(extracted.as_slice())
+        .assert()
+        .success()
+        .stdout("(\"world\")\n");
+}
+
 // --- Legacy round-trip tests (kept for regression) ---
 
 #[test]
