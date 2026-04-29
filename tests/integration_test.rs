@@ -458,6 +458,127 @@ fn field_access_round_trip_pipe_cq() {
     assert_eq!(direct, piped);
 }
 
+// --- Slice 4: vec ops ---
+
+#[test]
+fn vec_index_first() {
+    cq()
+        .args([".[0]"])
+        .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(1 : nat)\n");
+}
+
+#[test]
+fn vec_index_last() {
+    cq()
+        .args([".[2]"])
+        .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(3 : nat)\n");
+}
+
+#[test]
+fn vec_index_out_of_bounds_errors() {
+    cq()
+        .args([".[5]"])
+        .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
+        .assert()
+        .failure()
+        .stderr(contains("out of bounds"));
+}
+
+#[test]
+fn vec_slice_returns_subvec() {
+    cq()
+        .args([".[1:3]"])
+        .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat; 4 : nat })")
+        .assert()
+        .success()
+        .stdout("(vec { 2 : nat; 3 : nat })\n");
+}
+
+#[test]
+fn vec_iter_produces_stream() {
+    cq()
+        .args([".[]"])
+        .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
+        .assert()
+        .success()
+        .stdout("(1 : nat)\n(2 : nat)\n(3 : nat)\n");
+}
+
+#[test]
+fn vec_iter_empty_vec_no_output() {
+    cq()
+        .args([".[]"])
+        .write_stdin("(vec {})")
+        .assert()
+        .success()
+        .stdout("");
+}
+
+#[test]
+fn vec_iter_wrong_type_errors() {
+    cq()
+        .args([".[]"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .failure()
+        .stderr(contains("iterator '.[]' requires a vec"));
+}
+
+#[test]
+fn vec_index_wrong_type_errors() {
+    cq()
+        .args([".[0]"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .failure()
+        .stderr(contains("index access '.[0]' requires a vec"));
+}
+
+#[test]
+fn vec_iter_round_trip() {
+    // cq '.[]' | cq '.' produces the same elements
+    let exploded = cq()
+        .args([".[]"])
+        .write_stdin("(vec { 1 : nat; 2 : nat; 3 : nat })")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    cq()
+        .args(["."])
+        .write_stdin(exploded.as_slice())
+        .assert()
+        .success()
+        .stdout("(1 : nat)\n(2 : nat)\n(3 : nat)\n");
+}
+
+#[test]
+fn vec_chained_index_then_field() {
+    cq()
+        .args([".[0].name"])
+        .write_stdin("(vec { record { name = \"alice\" } })")
+        .assert()
+        .success()
+        .stdout("(\"alice\")\n");
+}
+
+#[test]
+fn vec_field_then_index() {
+    cq()
+        .args([".items.[1]"])
+        .write_stdin("(record { items = vec { 10 : nat; 20 : nat; 30 : nat } })")
+        .assert()
+        .success()
+        .stdout("(20 : nat)\n");
+}
+
 // --- Legacy round-trip tests (kept for regression) ---
 
 #[test]

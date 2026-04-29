@@ -9,6 +9,9 @@ use candid::{IDLArgs, IDLValue};
 enum Expr {
     Identity,
     Field(String),
+    Index(usize),
+    Slice(Option<usize>, Option<usize>),
+    Iter,
     Pipe(Box<Expr>, Box<Expr>),
 }
 
@@ -36,35 +39,81 @@ fn parse_pipe(s: &str) -> Result<(Expr, &str)> {
     }
 }
 
-// chain: .foo.bar.baz is sugar for .foo | .bar | .baz
+// chain: .foo.bar, .[0].foo — sugar for nested pipes
 fn parse_chain(s: &str) -> Result<(Expr, &str)> {
     let s = s.trim_start();
     let after_dot = s
         .strip_prefix('.')
         .ok_or_else(|| anyhow::anyhow!("query must start with '.'"))?;
 
-    let ident_end = after_dot
-        .find(|c: char| !c.is_alphanumeric() && c != '_')
-        .unwrap_or(after_dot.len());
-    let (ident, rest) = after_dot.split_at(ident_end);
-
-    let atom = if ident.is_empty() {
-        Expr::Identity
+    let (atom, rest) = if after_dot.starts_with('[') {
+        parse_bracket(after_dot)?
     } else {
-        Expr::Field(ident.to_string())
+        let ident_end = after_dot
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .unwrap_or(after_dot.len());
+        let (ident, rest) = after_dot.split_at(ident_end);
+        let atom = if ident.is_empty() {
+            Expr::Identity
+        } else {
+            Expr::Field(ident.to_string())
+        };
+        (atom, rest)
     };
 
-    // Chained dot: .foo.bar — only when next char after '.' is an identifier char
+    // Chained dot: .foo.bar, .[0].foo, .foo.[0]
     let rest_trimmed = rest.trim_start();
     if rest_trimmed.starts_with('.')
         && rest_trimmed[1..]
-            .starts_with(|c: char| c.is_alphabetic() || c == '_')
+            .starts_with(|c: char| c.is_alphabetic() || c == '_' || c == '[')
     {
         let (right, rest2) = parse_chain(rest_trimmed)?;
         Ok((Expr::Pipe(Box::new(atom), Box::new(right)), rest2))
     } else {
         Ok((atom, rest))
     }
+}
+
+// parse the bracket part: `[...]` — caller already consumed the leading `.`
+fn parse_bracket(s: &str) -> Result<(Expr, &str)> {
+    let inner = s.strip_prefix('[').unwrap().trim_start();
+
+    if let Some(rest) = inner.strip_prefix(']') {
+        return Ok((Expr::Iter, rest));
+    }
+
+    let (first_num, after_first) = parse_optional_usize(inner)?;
+    let after_first = after_first.trim_start();
+
+    if let Some(rest) = after_first.strip_prefix(']') {
+        let n = first_num
+            .ok_or_else(|| anyhow::anyhow!("expected index number inside '[]'"))?;
+        return Ok((Expr::Index(n), rest));
+    }
+
+    if let Some(after_colon) = after_first.strip_prefix(':') {
+        let (second_num, after_second) = parse_optional_usize(after_colon.trim_start())?;
+        let after_second = after_second.trim_start();
+        let rest = after_second
+            .strip_prefix(']')
+            .ok_or_else(|| anyhow::anyhow!("expected ']' to close slice expression"))?;
+        return Ok((Expr::Slice(first_num, second_num), rest));
+    }
+
+    bail!("invalid bracket expression; expected ']' or ':'")
+}
+
+fn parse_optional_usize(s: &str) -> Result<(Option<usize>, &str)> {
+    let num_end = s
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(s.len());
+    if num_end == 0 {
+        return Ok((None, s));
+    }
+    let n: usize = s[..num_end]
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid index: {:?}", &s[..num_end]))?;
+    Ok((Some(n), &s[num_end..]))
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +139,15 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
             let val = extract_field(&args, name)?;
             Ok(vec![IDLArgs::new(&[val])])
         }
+        Expr::Index(i) => {
+            let val = extract_index(&args, *i)?;
+            Ok(vec![IDLArgs::new(&[val])])
+        }
+        Expr::Slice(start, end) => {
+            let val = extract_slice(&args, *start, *end)?;
+            Ok(vec![IDLArgs::new(&[val])])
+        }
+        Expr::Iter => extract_iter(&args),
         Expr::Pipe(left, right) => {
             let mut results = Vec::new();
             for item in eval_expr(left, args)? {
@@ -123,6 +181,67 @@ fn extract_field(args: &IDLArgs, name: &str) -> Result<IDLValue> {
         }
         other => bail!(
             "field access '.{name}' requires a record, got {}",
+            type_name(other)
+        ),
+    }
+}
+
+fn extract_index(args: &IDLArgs, i: usize) -> Result<IDLValue> {
+    if args.args.len() != 1 {
+        bail!(
+            "index access '.[{i}]' requires a single value, got {} values",
+            args.args.len()
+        );
+    }
+    match &args.args[0] {
+        IDLValue::Vec(items) => items.get(i).cloned().ok_or_else(|| {
+            anyhow::anyhow!(
+                "index {i} out of bounds: vec has {} element(s)",
+                items.len()
+            )
+        }),
+        other => bail!(
+            "index access '.[{i}]' requires a vec, got {}",
+            type_name(other)
+        ),
+    }
+}
+
+fn extract_slice(args: &IDLArgs, start: Option<usize>, end: Option<usize>) -> Result<IDLValue> {
+    if args.args.len() != 1 {
+        bail!(
+            "slice access requires a single value, got {} values",
+            args.args.len()
+        );
+    }
+    match &args.args[0] {
+        IDLValue::Vec(items) => {
+            let len = items.len();
+            let s = start.unwrap_or(0);
+            let e = end.unwrap_or(len).min(len);
+            if s > len {
+                bail!("slice start {s} out of bounds: vec has {len} element(s)");
+            }
+            Ok(IDLValue::Vec(items[s..e].to_vec()))
+        }
+        other => bail!("slice access requires a vec, got {}", type_name(other)),
+    }
+}
+
+fn extract_iter(args: &IDLArgs) -> Result<Vec<IDLArgs>> {
+    if args.args.len() != 1 {
+        bail!(
+            "iterator '.[]' requires a single value, got {} values",
+            args.args.len()
+        );
+    }
+    match &args.args[0] {
+        IDLValue::Vec(items) => Ok(items
+            .iter()
+            .map(|v| IDLArgs::new(&[v.clone()]))
+            .collect()),
+        other => bail!(
+            "iterator '.[]' requires a vec, got {}",
             type_name(other)
         ),
     }
