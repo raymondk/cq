@@ -56,6 +56,12 @@ enum BoolOp {
     Or,
 }
 
+#[derive(Debug, Clone)]
+enum MatchArm {
+    Tag(String),
+    Default,
+}
+
 enum Expr {
     Identity,
     /// `.foo` / `.Tag` with an opt mode flag
@@ -98,6 +104,10 @@ enum Expr {
     Not(Box<Expr>),
     /// `select(predicate)` — pass-through filter
     Select(Box<Expr>),
+    /// `match { Tag1 = body1; _ = default }` — variant dispatch
+    Match(Vec<(MatchArm, Box<Expr>)>),
+    /// `tag(expr)` — returns the active variant tag as text
+    Tag(Box<Expr>),
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +369,14 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
         return Ok((Expr::Literal(IDLValue::Number(num_str.to_string())), rest));
     }
 
+    // String literal `"..."` → IDLValue::Text
+    if s.starts_with('"') {
+        let (bytes, rest) = parse_quoted_bytes(s)?;
+        let text = String::from_utf8(bytes)
+            .map_err(|_| anyhow::anyhow!("string literal must be valid UTF-8"))?;
+        return Ok((Expr::Literal(IDLValue::Text(text)), rest));
+    }
+
     // `select(pipe)`
     if let Some(after) = s.strip_prefix("select(") {
         let (pred, rest) = parse_pipe(after.trim_start())?;
@@ -418,6 +436,31 @@ fn parse_atom(s: &str) -> Result<(Expr, &str)> {
             let (bytes, rest) = parse_quoted_bytes(after)?;
             return Ok((Expr::MakeBlob(bytes), rest));
         }
+    }
+
+    // `match { Tag1 = body1; Tag2 = body2; _ = default }` — variant dispatch
+    if let Some(after) = s.strip_prefix("match") {
+        if after
+            .chars()
+            .next()
+            .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+        {
+            let after = after.trim_start();
+            if after.starts_with('{') {
+                let (arms, rest) = parse_match_arms(&after[1..])?;
+                return Ok((Expr::Match(arms), rest));
+            }
+        }
+    }
+
+    // `tag(expr)` — returns the active variant tag as text
+    if let Some(after) = s.strip_prefix("tag(") {
+        let (inner, rest) = parse_pipe(after.trim_start())?;
+        let rest = rest.trim_start();
+        let rest = rest
+            .strip_prefix(')')
+            .ok_or_else(|| anyhow::anyhow!("expected ')' after tag(...)"))?;
+        return Ok((Expr::Tag(Box::new(inner)), rest));
     }
 
     // `variant { Tag = expr }` or `variant { Tag }`
@@ -613,6 +656,61 @@ fn parse_variant_constructor(s: &str) -> Result<(String, Option<Expr>, &str)> {
         .strip_prefix('}')
         .ok_or_else(|| anyhow::anyhow!("expected '}}' to close variant constructor"))?;
     Ok((name, payload, rest))
+}
+
+// Parse `{ Tag1 = body1; Tag2 = body2; _ = default }` — caller consumed the leading `{`
+fn parse_match_arms(s: &str) -> Result<(Vec<(MatchArm, Box<Expr>)>, &str)> {
+    let mut arms: Vec<(MatchArm, Box<Expr>)> = Vec::new();
+    let mut rest = s.trim_start();
+    if let Some(after) = rest.strip_prefix('}') {
+        return Ok((arms, after));
+    }
+    loop {
+        rest = rest.trim_start();
+        // Parse arm name: `_` for default, or an identifier for a tag
+        let arm = if rest.starts_with('_') {
+            let after = &rest[1..];
+            if after
+                .chars()
+                .next()
+                .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+            {
+                rest = after;
+                MatchArm::Default
+            } else {
+                let ident_end = rest
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(rest.len());
+                let name = rest[..ident_end].to_string();
+                rest = &rest[ident_end..];
+                MatchArm::Tag(name)
+            }
+        } else {
+            let ident_end = rest
+                .find(|c: char| !c.is_alphanumeric() && c != '_')
+                .unwrap_or(rest.len());
+            if ident_end == 0 {
+                bail!("expected tag name or '_' in match arm, got {:?}", rest);
+            }
+            let name = rest[..ident_end].to_string();
+            rest = &rest[ident_end..];
+            MatchArm::Tag(name)
+        };
+        rest = rest.trim_start();
+        rest = rest
+            .strip_prefix('=')
+            .ok_or_else(|| anyhow::anyhow!("expected '=' after arm name in match"))?;
+        let (body, after_body) = parse_pipe(rest.trim_start())?;
+        arms.push((arm, Box::new(body)));
+        rest = after_body.trim_start();
+        if let Some(after) = rest.strip_prefix('}') {
+            return Ok((arms, after));
+        } else if let Some(after) = rest.strip_prefix(';') {
+            rest = after;
+        } else {
+            bail!("expected ';' or '}}' in match expression, got {:?}", rest);
+        }
+    }
 }
 
 // Parse a double-quoted string, returning raw bytes (handles \n \t \r \" \\ \XX hex escapes)
@@ -1022,8 +1120,21 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
             if r_results.len() != 1 || r_results[0].args.len() != 1 {
                 bail!("comparison requires a single value on the right side");
             }
-            let lv = to_num(&l_results[0].args[0])?;
-            let rv = to_num(&r_results[0].args[0])?;
+            let lval = &l_results[0].args[0];
+            let rval = &r_results[0].args[0];
+            if let (IDLValue::Text(ls), IDLValue::Text(rs)) = (lval, rval) {
+                let result = match op {
+                    CmpOp::Eq => ls == rs,
+                    CmpOp::Ne => ls != rs,
+                    CmpOp::Lt => ls < rs,
+                    CmpOp::Gt => ls > rs,
+                    CmpOp::Le => ls <= rs,
+                    CmpOp::Ge => ls >= rs,
+                };
+                return Ok(vec![IDLArgs::new(&[IDLValue::Bool(result)])]);
+            }
+            let lv = to_num(lval)?;
+            let rv = to_num(rval)?;
             let result = eval_cmp(*op, lv, rv)?;
             Ok(vec![IDLArgs::new(&[IDLValue::Bool(result)])])
         }
@@ -1056,6 +1167,53 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
                 IDLValue::Bool(false) => Ok(vec![]),
                 other => bail!(
                     "select predicate must return bool, got {}",
+                    type_name(other)
+                ),
+            }
+        }
+
+        Expr::Match(arms) => {
+            if args.args.len() != 1 {
+                bail!(
+                    "match requires a single value, got {} values",
+                    args.args.len()
+                );
+            }
+            let variant = match &args.args[0] {
+                IDLValue::Variant(v) => v,
+                other => bail!("match requires a variant value, got {}", type_name(other)),
+            };
+            let active_tag = label_display(&variant.0.id);
+            let payload = variant.0.val.clone();
+            for (arm, body) in arms {
+                let matches = match arm {
+                    MatchArm::Tag(name) => {
+                        let h = candid::idl_hash(name);
+                        label_matches(&variant.0.id, name, h)
+                    }
+                    MatchArm::Default => true,
+                };
+                if matches {
+                    return eval_expr(body, IDLArgs::new(&[payload]));
+                }
+            }
+            bail!(
+                "no match arm for variant tag '{active_tag}'; add a '_ = ...' default arm"
+            )
+        }
+
+        Expr::Tag(inner) => {
+            let results = eval_expr(inner, args)?;
+            if results.len() != 1 || results[0].args.len() != 1 {
+                bail!("tag() requires a single value");
+            }
+            match &results[0].args[0] {
+                IDLValue::Variant(v) => {
+                    let tag = label_display(&v.0.id);
+                    Ok(vec![IDLArgs::new(&[IDLValue::Text(tag)])])
+                }
+                other => bail!(
+                    "tag() requires a variant value, got {}",
                     type_name(other)
                 ),
             }

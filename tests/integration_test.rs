@@ -1338,3 +1338,122 @@ fn select_with_compound_predicate() {
         .success()
         .stdout("(5 : nat)\n");
 }
+
+// --- Slice 9: match and tag ---
+
+#[test]
+fn match_dispatches_to_correct_arm() {
+    cq()
+        .args(["match { Transfer = . ; Receive = 0 }"])
+        .write_stdin("(variant { Transfer = \"hello\" })")
+        .assert()
+        .success()
+        .stdout("(\"hello\")\n");
+}
+
+#[test]
+fn match_payload_bound_as_dot() {
+    cq()
+        .args(["match { Ok = . ; Err = \"error\" }"])
+        .write_stdin("(variant { Ok = 42 : nat })")
+        .assert()
+        .success()
+        .stdout("(42 : nat)\n");
+}
+
+#[test]
+fn match_default_arm_catches_unmatched() {
+    cq()
+        .args(["match { Transfer = \"transfer\" ; _ = \"other\" }"])
+        .write_stdin("(variant { Mint = null })")
+        .assert()
+        .success()
+        .stdout("(\"other\")\n");
+}
+
+#[test]
+fn match_no_arm_no_default_errors() {
+    cq()
+        .args(["match { Transfer = . }"])
+        .write_stdin("(variant { Receive = null })")
+        .assert()
+        .failure()
+        .stderr(contains("no match arm"));
+}
+
+#[test]
+fn match_null_payload_arm() {
+    cq()
+        .args(["match { Pending = \"pending\" ; _ = \"other\" }"])
+        .write_stdin("(variant { Pending })")
+        .assert()
+        .success()
+        .stdout("(\"pending\")\n");
+}
+
+#[test]
+fn match_non_variant_errors() {
+    cq()
+        .args(["match { A = . }"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .failure()
+        .stderr(contains("variant"));
+}
+
+#[test]
+fn tag_returns_active_tag_as_text() {
+    cq()
+        .args(["tag(.)"])
+        .write_stdin("(variant { Transfer = 100 : nat })")
+        .assert()
+        .success()
+        .stdout("(\"Transfer\")\n");
+}
+
+#[test]
+fn tag_on_non_variant_errors() {
+    cq()
+        .args(["tag(.)"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .failure()
+        .stderr(contains("variant"));
+}
+
+#[test]
+fn tag_on_nested_variant_field() {
+    cq()
+        .args(["tag(.status)"])
+        .write_stdin("(record { status = variant { Active = null } })")
+        .assert()
+        .success()
+        .stdout("(\"Active\")\n");
+}
+
+#[test]
+fn tag_select_filter_stream() {
+    cq()
+        .args(["select(tag(.kind) == \"Transfer\")"])
+        .write_stdin(
+            "(record { kind = variant { Transfer = 100 : nat } })\
+             (record { kind = variant { Receive = 50 : nat } })\
+             (record { kind = variant { Transfer = 200 : nat } })",
+        )
+        .assert()
+        .success()
+        .stdout(
+            "(record { kind = variant { Transfer = 100 : nat } })\n\
+             (record { kind = variant { Transfer = 200 : nat } })\n",
+        );
+}
+
+#[test]
+fn match_body_expression_uses_payload() {
+    cq()
+        .args(["match { Transfer = . * 2 ; _ = 0 }"])
+        .write_stdin("(variant { Transfer = 10 : nat })")
+        .assert()
+        .success()
+        .stdout("(20 : nat)\n");
+}
