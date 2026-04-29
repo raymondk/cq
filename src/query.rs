@@ -6,14 +6,29 @@ use candid::{IDLArgs, IDLValue};
 // AST
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum OptMode {
+    Normal,   // .field
+    Optional, // .field?  — empty on miss/None, unwrap if Some
+    Assert,   // .field!  — error on miss/None, unwrap if Some
+}
+
 enum Expr {
     Identity,
-    /// `.foo` / `.Tag` — bool flag = optional (`.foo?` / `.Tag?`)
-    Field(String, bool),
+    /// `.foo` / `.Tag` with an opt mode flag
+    Field(String, OptMode),
     Index(usize),
     Slice(Option<usize>, Option<usize>),
     Iter,
     Pipe(Box<Expr>, Box<Expr>),
+    /// `expr // fallback` — unwrap opt or use fallback
+    Alt(Box<Expr>, Box<Expr>),
+    /// `.?` — unwrap the current opt value (empty if None)
+    OptUnwrap,
+    /// `some(expr)` — wrap value in opt
+    SomeOf(Box<Expr>),
+    /// `none` — opt-None literal
+    None_,
 }
 
 // ---------------------------------------------------------------------------
@@ -28,11 +43,15 @@ fn parse(s: &str) -> Result<Expr> {
     Ok(expr)
 }
 
-// pipe has lowest precedence: chain | chain | ...
+// pipe has lowest precedence: alt | alt | ...
 fn parse_pipe(s: &str) -> Result<(Expr, &str)> {
-    let (left, rest) = parse_chain(s)?;
+    let (left, rest) = parse_alt(s)?;
     let rest = rest.trim_start();
     if let Some(after) = rest.strip_prefix('|') {
+        // Don't consume '//' as a pipe '|'
+        if after.starts_with('/') {
+            return Ok((left, rest));
+        }
         let (right, rest2) = parse_pipe(after.trim_start())?;
         Ok((Expr::Pipe(Box::new(left), Box::new(right)), rest2))
     } else {
@@ -40,8 +59,49 @@ fn parse_pipe(s: &str) -> Result<(Expr, &str)> {
     }
 }
 
-// chain: .foo.bar, .[0].foo — sugar for nested pipes
-fn parse_chain(s: &str) -> Result<(Expr, &str)> {
+// alt: atom // atom // ... — higher precedence than pipe
+fn parse_alt(s: &str) -> Result<(Expr, &str)> {
+    let (left, rest) = parse_atom(s)?;
+    let rest = rest.trim_start();
+    if let Some(after) = rest.strip_prefix("//") {
+        let (right, rest2) = parse_atom(after.trim_start())?;
+        Ok((Expr::Alt(Box::new(left), Box::new(right)), rest2))
+    } else {
+        Ok((left, rest))
+    }
+}
+
+// atom: dotchain | some(pipe) | none
+fn parse_atom(s: &str) -> Result<(Expr, &str)> {
+    let s = s.trim_start();
+
+    // `none` keyword (not followed by alphanumeric or '_', to avoid matching 'none_field')
+    if let Some(after) = s.strip_prefix("none") {
+        if after
+            .chars()
+            .next()
+            .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+        {
+            return Ok((Expr::None_, after));
+        }
+    }
+
+    // `some(pipe)`
+    if let Some(after) = s.strip_prefix("some(") {
+        let (inner, rest) = parse_pipe(after.trim_start())?;
+        let rest = rest.trim_start();
+        let rest = rest
+            .strip_prefix(')')
+            .ok_or_else(|| anyhow::anyhow!("expected ')' after some(...)"))?;
+        return Ok((Expr::SomeOf(Box::new(inner)), rest));
+    }
+
+    // fallthrough to dotchain
+    parse_dotchain(s)
+}
+
+// dotchain: .foo? .bar! .[0] etc. (chained via chain_tail)
+fn parse_dotchain(s: &str) -> Result<(Expr, &str)> {
     let s = s.trim_start();
     let after_dot = s
         .strip_prefix('.')
@@ -55,14 +115,20 @@ fn parse_chain(s: &str) -> Result<(Expr, &str)> {
             .unwrap_or(after_dot.len());
         let (ident, rest) = after_dot.split_at(ident_end);
         if ident.is_empty() {
-            (Expr::Identity, rest)
-        } else {
-            let (optional, rest) = if rest.starts_with('?') {
-                (true, &rest[1..])
+            if rest.starts_with('?') {
+                (Expr::OptUnwrap, &rest[1..])
             } else {
-                (false, rest)
+                (Expr::Identity, rest)
+            }
+        } else {
+            let (mode, rest) = if rest.starts_with('?') {
+                (OptMode::Optional, &rest[1..])
+            } else if rest.starts_with('!') {
+                (OptMode::Assert, &rest[1..])
+            } else {
+                (OptMode::Normal, rest)
             };
-            (Expr::Field(ident.to_string(), optional), rest)
+            (Expr::Field(ident.to_string(), mode), rest)
         }
     };
 
@@ -75,7 +141,7 @@ fn chain_tail(atom: Expr, rest: &str) -> Result<(Expr, &str)> {
         && rest_trimmed[1..]
             .starts_with(|c: char| c.is_alphabetic() || c == '_' || c == '[')
     {
-        let (right, rest2) = parse_chain(rest_trimmed)?;
+        let (right, rest2) = parse_dotchain(rest_trimmed)?;
         Ok((Expr::Pipe(Box::new(atom), Box::new(right)), rest2))
     } else {
         Ok((atom, rest))
@@ -143,8 +209,8 @@ pub fn evaluate(args: IDLArgs, expr: Option<&str>) -> Result<Vec<IDLArgs>> {
 fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
     match expr {
         Expr::Identity => Ok(vec![args]),
-        Expr::Field(name, optional) => {
-            let vals = extract_field(&args, name, *optional)?;
+        Expr::Field(name, mode) => {
+            let vals = extract_field(&args, name, *mode)?;
             Ok(vals.into_iter().map(|v| IDLArgs::new(&[v])).collect())
         }
         Expr::Index(i) => {
@@ -163,10 +229,58 @@ fn eval_expr(expr: &Expr, args: IDLArgs) -> Result<Vec<IDLArgs>> {
             }
             Ok(results)
         }
+        Expr::OptUnwrap => {
+            if args.args.len() != 1 {
+                bail!("'.?' requires a single value, got {}", args.args.len());
+            }
+            match &args.args[0] {
+                IDLValue::Opt(inner) => Ok(vec![IDLArgs::new(&[*inner.clone()])]),
+                IDLValue::None => Ok(vec![]),
+                other => bail!("'.?' requires an opt value, got {}", type_name(other)),
+            }
+        }
+        Expr::Alt(left, right) => {
+            let results = eval_expr(left, args.clone())?;
+            let unwrapped: Vec<IDLArgs> = results
+                .into_iter()
+                .filter_map(unwrap_opt_filter)
+                .collect();
+            if unwrapped.is_empty() {
+                eval_expr(right, args)
+            } else {
+                Ok(unwrapped)
+            }
+        }
+        Expr::SomeOf(inner) => {
+            let results = eval_expr(inner, args)?;
+            results
+                .into_iter()
+                .map(|r| {
+                    if r.args.len() != 1 {
+                        bail!("some() requires a single value, got {}", r.args.len());
+                    }
+                    Ok(IDLArgs::new(&[IDLValue::Opt(Box::new(r.args[0].clone()))]))
+                })
+                .collect()
+        }
+        Expr::None_ => Ok(vec![IDLArgs::new(&[IDLValue::None])]),
     }
 }
 
-fn extract_field(args: &IDLArgs, name: &str, optional: bool) -> Result<Vec<IDLValue>> {
+/// For `//`: if value is opt Some, unwrap it; if opt None/null, return None (filter out).
+fn unwrap_opt_filter(r: IDLArgs) -> Option<IDLArgs> {
+    if r.args.len() == 1 {
+        match &r.args[0] {
+            IDLValue::Opt(inner) => Some(IDLArgs::new(&[*inner.clone()])),
+            IDLValue::None => None,
+            _ => Some(r),
+        }
+    } else {
+        Some(r)
+    }
+}
+
+fn extract_field(args: &IDLArgs, name: &str, mode: OptMode) -> Result<Vec<IDLValue>> {
     if args.args.len() != 1 {
         bail!(
             "field access '.{name}' requires a single value, got {} values",
@@ -178,10 +292,10 @@ fn extract_field(args: &IDLArgs, name: &str, optional: bool) -> Result<Vec<IDLVa
             let hash = candid::idl_hash(name);
             for field in fields {
                 if label_matches(&field.id, name, hash) {
-                    return Ok(vec![field.val.clone()]);
+                    return apply_opt_mode(mode, &field.val, name);
                 }
             }
-            if optional {
+            if mode == OptMode::Optional {
                 return Ok(vec![]);
             }
             let available: Vec<String> = fields.iter().map(|f| label_display(&f.id)).collect();
@@ -194,9 +308,9 @@ fn extract_field(args: &IDLArgs, name: &str, optional: bool) -> Result<Vec<IDLVa
             let field = &v.0;
             let hash = candid::idl_hash(name);
             if label_matches(&field.id, name, hash) {
-                return Ok(vec![field.val.clone()]);
+                return apply_opt_mode(mode, &field.val, name);
             }
-            if optional {
+            if mode == OptMode::Optional {
                 return Ok(vec![]);
             }
             let active = label_display(&field.id);
@@ -206,6 +320,23 @@ fn extract_field(args: &IDLArgs, name: &str, optional: bool) -> Result<Vec<IDLVa
             "field access '.{name}' requires a record or variant, got {}",
             type_name(other)
         ),
+    }
+}
+
+/// Apply the opt mode to a retrieved value.
+fn apply_opt_mode(mode: OptMode, val: &IDLValue, field: &str) -> Result<Vec<IDLValue>> {
+    match mode {
+        OptMode::Normal => Ok(vec![val.clone()]),
+        OptMode::Optional => match val {
+            IDLValue::Opt(inner) => Ok(vec![*inner.clone()]),
+            IDLValue::None => Ok(vec![]),
+            _ => Ok(vec![val.clone()]),
+        },
+        OptMode::Assert => match val {
+            IDLValue::Opt(inner) => Ok(vec![*inner.clone()]),
+            IDLValue::None => bail!("field '{field}' is None; expected Some"),
+            _ => Ok(vec![val.clone()]),
+        },
     }
 }
 

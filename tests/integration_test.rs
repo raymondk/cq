@@ -727,3 +727,141 @@ fn round_trip_text_to_text_is_identity() {
         .success()
         .stdout(format!("{}\n", first_str.trim()));
 }
+
+// --- Slice 6: opt handling ---
+
+#[test]
+fn opt_field_access_returns_wrapped_value() {
+    // .field on an opt field returns the opt-wrapped value (lossless)
+    cq()
+        .args([".x"])
+        .write_stdin("(record { x = opt 42 : opt nat })")
+        .assert()
+        .success()
+        .stdout("(opt (42 : nat))\n");
+}
+
+#[test]
+fn opt_unwrap_some_returns_inner() {
+    cq()
+        .args([".x?"])
+        .write_stdin("(record { x = opt 42 : opt nat })")
+        .assert()
+        .success()
+        .stdout("(42 : nat)\n");
+}
+
+#[test]
+fn opt_unwrap_none_produces_no_output() {
+    cq()
+        .args([".x?"])
+        .write_stdin("(record { x = null : opt nat })")
+        .assert()
+        .success()
+        .stdout("");
+}
+
+#[test]
+fn opt_assert_some_returns_inner() {
+    cq()
+        .args([".x!"])
+        .write_stdin("(record { x = opt 42 : opt nat })")
+        .assert()
+        .success()
+        .stdout("(42 : nat)\n");
+}
+
+#[test]
+fn opt_assert_none_errors() {
+    cq()
+        .args([".x!"])
+        .write_stdin("(record { x = null : opt nat })")
+        .assert()
+        .failure()
+        .stderr(contains("None"));
+}
+
+#[test]
+fn opt_alt_some_returns_inner() {
+    // .x // none — when x is Some, return the inner value (unwrapped)
+    cq()
+        .args([".x // none"])
+        .write_stdin("(record { x = opt 42 : opt nat })")
+        .assert()
+        .success()
+        .stdout("(42 : nat)\n");
+}
+
+#[test]
+fn opt_alt_none_returns_fallback() {
+    // .x // none — when x is None, return the `none` literal
+    cq()
+        .args([".x // none"])
+        .write_stdin("(record { x = null : opt nat })")
+        .assert()
+        .success()
+        .stdout("(null)\n");
+}
+
+#[test]
+fn opt_some_constructor_wraps_value() {
+    cq()
+        .args(["some(.)"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .success()
+        .stdout("(opt (42 : nat))\n");
+}
+
+#[test]
+fn opt_none_literal() {
+    cq()
+        .args(["none"])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .success()
+        .stdout("(null)\n");
+}
+
+#[test]
+fn opt_chained_unwrap_some_accesses_inner_field() {
+    // .address?.city — when address is Some, unwrap and access city
+    cq()
+        .args([".address?.city"])
+        .write_stdin("(record { address = opt record { city = \"NYC\" } })")
+        .assert()
+        .success()
+        .stdout("(\"NYC\")\n");
+}
+
+#[test]
+fn opt_chained_unwrap_none_produces_no_output() {
+    // .address?.city — when address is None, produces nothing
+    cq()
+        .args([".address?.city"])
+        .write_stdin("(record { address = null : opt record {} })")
+        .assert()
+        .success()
+        .stdout("");
+}
+
+#[test]
+fn opt_some_round_trip() {
+    // some(.) wraps a value; .? unwraps it back
+    let wrapped = cq()
+        .args(["some(.)"])
+        .write_stdin("(\"hello\")")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let wrapped_str = String::from_utf8(wrapped).unwrap();
+    // Use .? to unwrap the standalone opt value
+    cq()
+        .args([".?"])
+        .write_stdin(wrapped_str.trim())
+        .assert()
+        .success()
+        .stdout("(\"hello\")\n");
+}
