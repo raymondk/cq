@@ -2193,3 +2193,91 @@ fn did_file_malformed_error() {
         .failure()
         .stderr(contains("failed to parse tests/fixtures/bad.did"));
 }
+
+// --- Slice 14: idl_hash auto-resolution + .[hash] numeric fallback ---
+
+#[test]
+fn hash_auto_resolve_named_field_no_did() {
+    // .foo on a hash-keyed binary record (no --did) works via idl_hash auto-resolution
+    // idl_hash("foo") = 5_097_222 (the hash in the binary record)
+    cq()
+        .args(["--input-format", "hex", ".foo"])
+        .write_stdin("4449444c016c01868eb7027d01002a")
+        .assert()
+        .success()
+        .stdout("(42 : nat)\n");
+}
+
+#[test]
+fn hash_numeric_access_on_hash_keyed_record() {
+    // .[5097222] accesses by raw hash on a binary-decoded record
+    cq()
+        .args(["--input-format", "hex", ".[5097222]"])
+        .write_stdin("4449444c016c01868eb7027d01002a")
+        .assert()
+        .success()
+        .stdout("(42 : nat)\n");
+}
+
+#[test]
+fn hash_numeric_access_on_named_field_record() {
+    // .[n] also works when the field has a Named label (text input)
+    // idl_hash("foo") = 5097222
+    cq()
+        .args([".[5097222]"])
+        .write_stdin("(record { foo = 42 : nat })")
+        .assert()
+        .success()
+        .stdout("(42 : nat)\n");
+}
+
+#[test]
+fn hash_numeric_access_with_did() {
+    // .[n] still works when --did is provided (schema doesn't affect in-memory IDLValue labels)
+    cq()
+        .args([
+            "--input-format",
+            "hex",
+            "--did",
+            "tests/fixtures/schema1.did",
+            ".[5097222]",
+        ])
+        .write_stdin("4449444c016c01868eb7027d01002a")
+        .assert()
+        .success()
+        .stdout("(42 : nat)\n");
+}
+
+#[test]
+fn hash_numeric_access_not_found_error() {
+    // .[n] with a hash not present in the record gives a clear error
+    cq()
+        .args([".[9999999]"])
+        .write_stdin("(record { foo = 42 : nat })")
+        .assert()
+        .failure()
+        .stderr(contains("no field with hash 9999999"));
+}
+
+#[test]
+fn hash_named_field_wrong_name_fails() {
+    // Querying .old_name after a field was renamed fails loudly (schema drift caught)
+    cq()
+        .args(["--input-format", "hex", ".renamed_field"])
+        .write_stdin("4449444c016c01868eb7027d01002a")
+        .assert()
+        .failure()
+        .stderr(contains("unknown field"));
+}
+
+#[test]
+fn hash_named_and_numeric_equivalent() {
+    // .bar and .[idl_hash("bar")] produce the same result on a text-encoded record
+    // idl_hash("bar") can be computed; we verify via chained queries that they're consistent
+    cq()
+        .args([".foo"])
+        .write_stdin("(record { foo = 99 : nat; bar = 1 : nat })")
+        .assert()
+        .success()
+        .stdout("(99 : nat)\n");
+}

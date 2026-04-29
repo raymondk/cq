@@ -2282,8 +2282,24 @@ fn extract_index(args: &IDLArgs, i: usize) -> Result<IDLValue> {
                 items.len()
             )
         }),
+        IDLValue::Record(fields) => {
+            if i > u32::MAX as usize {
+                bail!("hash index {i} is out of range for a 32-bit field hash");
+            }
+            let hash = i as u32;
+            for field in fields {
+                let matches = match &field.id {
+                    Label::Id(n) | Label::Unnamed(n) => *n == hash,
+                    Label::Named(n) => candid::idl_hash(n) == hash,
+                };
+                if matches {
+                    return Ok(field.val.clone());
+                }
+            }
+            bail!("no field with hash {i} in record");
+        }
         other => bail!(
-            "index access '.[{i}]' requires a vec, got {}",
+            "index access '.[{i}]' requires a vec or record, got {}",
             type_name(other)
         ),
     }
