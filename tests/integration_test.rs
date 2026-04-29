@@ -2538,3 +2538,57 @@ fn blob_threshold_zero_always_hex() {
     let s = String::from_utf8(out).unwrap();
     assert!(s.contains("blob_hex"), "expected blob_hex with threshold=0, got: {:?}", s);
 }
+
+// --- --exit-status / -e flag ---
+
+#[test]
+fn exit_status_no_values_exits_1() {
+    // .[] on empty vec produces zero values; -e should give exit 1
+    cq()
+        .args(["-e", ".[]"])
+        .write_stdin("(vec {})")
+        .assert()
+        .failure()
+        .code(1);
+}
+
+#[test]
+fn exit_status_with_values_exits_0() {
+    // -e with at least one value should still exit 0
+    cq()
+        .args(["-e", "."])
+        .write_stdin("(42 : nat)")
+        .assert()
+        .success();
+}
+
+#[test]
+fn exit_status_long_flag() {
+    cq()
+        .args(["--exit-status", ".[]"])
+        .write_stdin("(vec {})")
+        .assert()
+        .failure()
+        .code(1);
+}
+
+#[test]
+fn without_exit_status_empty_is_0() {
+    // Without -e, empty output is still exit 0
+    cq()
+        .args([".[]"])
+        .write_stdin("(vec {})")
+        .assert()
+        .success();
+}
+
+#[test]
+fn exit_status_error_still_exits_1() {
+    // Parse error should still exit 1 regardless of -e
+    cq()
+        .args(["-e", "."])
+        .write_stdin("not valid candid")
+        .assert()
+        .failure()
+        .code(1);
+}

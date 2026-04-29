@@ -48,12 +48,18 @@ fn run() -> Result<()> {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
 
+    let mut emitted = 0usize;
     for value_result in stream {
         let args_val = value_result?;
         let results = query::evaluate(args_val, args.query.as_deref())?;
         for result in results {
             output::emit(&mut out, &result, &output_format, &schema.hash_to_name, &fmt_opts)?;
+            emitted += 1;
         }
+    }
+
+    if args.exit_status && emitted == 0 {
+        std::process::exit(1);
     }
 
     Ok(())

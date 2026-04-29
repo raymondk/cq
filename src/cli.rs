@@ -36,4 +36,8 @@ pub struct Args {
     /// Blob rendering threshold in bytes; blobs longer than this use hex (default: 64)
     #[arg(long, value_name = "N", default_value = "64")]
     pub blob_threshold: usize,
+
+    /// Exit with status 1 if no values were produced
+    #[arg(short = 'e', long)]
+    pub exit_status: bool,
 }
